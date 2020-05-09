@@ -1,9 +1,10 @@
-package sensors
+package environment
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/mklimuk/sensors"
 	"time"
 )
 
@@ -15,12 +16,12 @@ var ErrStaleData = fmt.Errorf("stale data")
 
 // HIH6021 represents Honywell HumidIcon™ Digital Humidity/Temperature sensor
 type HIH6021 struct {
-	transport I2CBus
+	transport sensors.I2CBus
 	lastTemp  float32
 	lastHum   float32
 }
 
-func NewHIH6021(trans I2CBus) *HIH6021 {
+func NewHIH6021(trans sensors.I2CBus) *HIH6021 {
 	return &HIH6021{transport: trans}
 }
 
@@ -61,8 +62,8 @@ func (sensor *HIH6021) measure(ctx context.Context) error {
 		// has been completed
 		return ErrStaleData
 	}
-	sensor.lastTemp = convertHumidity(resp[0:2])
-	sensor.lastHum = convertTemperature(resp[2:4])
+	sensor.lastHum = convertHumidity(resp[0:2])
+	sensor.lastTemp = convertTemperature(resp[2:4])
 	return nil
 }
 

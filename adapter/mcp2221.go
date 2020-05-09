@@ -170,7 +170,7 @@ func (d *MCP2221) send(ctx context.Context) error {
 		return fmt.Errorf("short write: %d", n)
 	}
 	time.Sleep(50 * time.Millisecond)
-	console.Info("reading response from adapter")
+	console.Debug("reading response from adapter")
 	n, err = dev.Read(d.response)
 	if err != nil {
 		return fmt.Errorf("could not read response: %w", err)

@@ -29,6 +29,7 @@ COVERAGE_FILE:=coverage.out
 COVERAGE_HTML:=coverage.html
 
 SENSORS_BIN:=dist/sensors
+SENSORS_BIN_LOCAL:=dist/sns
 SENSORS_SRC:=./cmd/sensors
 
 DIST = dist
@@ -76,12 +77,12 @@ LD_FLAGS:=-s -w -X github.com/mklimuk/sensors/cmd/sensors.version=$(VERSION) -X 
 
 .PHONY: build
 compile: dirs
-	GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
+	GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN_LOCAL) -v $(SENSORS_SRC)
 
 # this is missing C cross compiler setup
 .PHONY: compile-linux
 compile-linux: dirs
-	GOOS=linux GOARCH=amd64 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
+	GOOS=linux GOARCH=amd64 GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
 
 
 

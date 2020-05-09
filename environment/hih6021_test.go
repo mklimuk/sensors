@@ -1,4 +1,4 @@
-package sensors
+package environment
 
 import (
 	"encoding/hex"
