@@ -18,14 +18,15 @@ var tempReadCmd = cli.Command{
 			Name:  "adapter,a",
 			Value: "mcp2221",
 		},
+		cli.StringFlag{
+			Name:  "sensor,s",
+			Value: "hih6021",
+		},
 		cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() != 1 {
-			return console.Exit(1, "expected 1 argument, got %d", c.NArg())
-		}
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
-		switch c.Args().Get(0) {
+		switch c.String("sensor") {
 		case "hih6021":
 			switch c.String("adapter") {
 			case "mcp2221":
