@@ -69,18 +69,18 @@ func (b *BMA220) InitMotionDetection(ctx context.Context) error {
 	return nil
 }
 
-func (b *BMA220) CheckMotionInterrupt(ctx context.Context) (bool, error) {
+func (b *BMA220) CheckMotionInterrupt(ctx context.Context) (int, error) {
 	err := b.transport.WriteToAddr(ctx, addr, []byte{regInterrupts})
 	if err != nil {
-		return false, fmt.Errorf("could not set registry pointer: %w", err)
+		return 0, fmt.Errorf("could not set registry pointer: %w", err)
 	}
 	buf := []byte{0x00}
 	err = b.transport.ReadFromAddr(ctx, addr, buf)
 	if err != nil {
-		return false, fmt.Errorf("could not read registry content: %w", err)
+		return 0, fmt.Errorf("could not read registry content: %w", err)
 	}
 	// slope detection is on bit 0
-	return buf[0]&0x01 > 0, nil
+	return int(buf[0] & 0x01), nil
 }
 
 func (b *BMA220) ResetMotionInterrupt(ctx context.Context) error {
