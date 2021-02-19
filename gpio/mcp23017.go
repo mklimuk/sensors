@@ -2,7 +2,9 @@ package gpio
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
 	"github.com/mklimuk/sensors"
 )
 
@@ -90,31 +92,48 @@ var (
 3. Read port register 0x09
 */
 type MCP23017 struct {
-	transport sensors.I2CBus
-	bank      int
-	address   byte
+	transport  sensors.I2CBus
+	bank       int
+	address    byte
+	retryLimit int
 }
 
 func NewMCP23017(bus sensors.I2CBus, address byte) *MCP23017 {
-	return &MCP23017{transport: bus, address: address}
+	return &MCP23017{retryLimit: 1, transport: bus, address: address}
 }
 
 // InitA sets IODIR registry to inout on I/O pool A
 func (m *MCP23017) InitA(ctx context.Context, inout byte) error {
-	err := m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IODIRA], inout})
-	if err != nil {
-		return fmt.Errorf("could not initialize gpio A set: %w", err)
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IODIRA], inout})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not initialize gpio A set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
 	}
-	return nil
+	return fmt.Errorf("could not initialize gpio A set (retry limit reached): %w", err)
 }
 
 // InitB sets IODIR registry to inout on I/O pool B
 func (m *MCP23017) InitB(ctx context.Context, inout byte) error {
-	err := m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IODIRA], inout})
-	if err != nil {
-		return fmt.Errorf("could not initialize gpio B set: %w", err)
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IODIRA], inout})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not initialize gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
 	}
-	return nil
+	return fmt.Errorf("could not initialize gpio B set (retry limit reached): %w", err)
 }
 
 func (m MCP23017) readRegistry(ctx context.Context, addr byte) (byte, error) {
@@ -132,20 +151,36 @@ func (m MCP23017) readRegistry(ctx context.Context, addr byte) (byte, error) {
 
 // PullUpA sets up pull up resistors on set A
 func (m *MCP23017) PullUpA(ctx context.Context, settings byte) error {
-	err := m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][GPPUA], settings})
-	if err != nil {
-		return fmt.Errorf("could not initialize gpio A set: %w", err)
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][GPPUA], settings})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not set pull-up on gpio A set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
 	}
-	return nil
+	return fmt.Errorf("could not set pull-up on gpio A set (retry limit reached): %w", err)
 }
 
 // PullUpB sets up pull up resistors on set B
 func (m *MCP23017) PullUpB(ctx context.Context, settings byte) error {
-	err := m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][GPPUB], settings})
-	if err != nil {
-		return fmt.Errorf("could not initialize gpio B set: %w", err)
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][GPPUB], settings})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not set pull-up on gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
 	}
-	return nil
+	return fmt.Errorf("could not set pull-up on gpio B set (retry limit reached): %w", err)
 }
 
 func (m *MCP23017) Read(ctx context.Context) ([]byte, error) {
@@ -164,29 +199,106 @@ func (m *MCP23017) Read(ctx context.Context) ([]byte, error) {
 
 // ReadA reads gpio A set values
 func (m *MCP23017) ReadA(ctx context.Context) (byte, error) {
-	return m.readRegistry(ctx, BankAddr[m.bank][GPIOA])
+	var err error
+	var res byte
+	for i := m.retryLimit; i > 0; i-- {
+		res, err = m.readRegistry(ctx, BankAddr[m.bank][GPIOA])
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return res, fmt.Errorf("could not read gpio A set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
+	}
+	return res, fmt.Errorf("could not read gpio A set (retry limit reached): %w", err)
 }
 
 // ReadB reads gpio B set values
 func (m *MCP23017) ReadB(ctx context.Context) (byte, error) {
-	return m.readRegistry(ctx, BankAddr[m.bank][GPIOB])
+	var err error
+	var res byte
+	for i := m.retryLimit; i > 0; i-- {
+		res, err = m.readRegistry(ctx, BankAddr[m.bank][GPIOB])
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return res, fmt.Errorf("could not read gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
+	}
+	return res, fmt.Errorf("could not read gpio B set (retry limit reached): %w", err)
 }
 
 // ReadSettingsA reads contents of IOCON registry
 func (m *MCP23017) ReadSettingsA(ctx context.Context) (byte, error) {
-	return m.readRegistry(ctx, BankAddr[m.bank][IOCONA])
+	var err error
+	var res byte
+	for i := m.retryLimit; i > 0; i-- {
+		res, err = m.readRegistry(ctx, BankAddr[m.bank][IOCONA])
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return res, fmt.Errorf("could not read gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
+	}
+	return res, fmt.Errorf("could not read gpio B set (retry limit reached): %w", err)
 }
 
 // WriteSettingsA sets up pull up resistors on set A
 func (m *MCP23017) WriteSettingsA(ctx context.Context, settings byte) error {
-	err := m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IOCONA], settings})
-	if err != nil {
-		return fmt.Errorf("could not write settings: %w", err)
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IOCONA], settings})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not write settings on gpio A set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
 	}
-	return nil
+	return fmt.Errorf("could not write settings on gpio A set (retry limit reached): %w", err)
 }
 
 // ReadSettingsB reads contents of IOCON registry
 func (m *MCP23017) ReadSettingsB(ctx context.Context) (byte, error) {
-	return m.readRegistry(ctx, BankAddr[m.bank][IOCONB])
+	var err error
+	var res byte
+	for i := m.retryLimit; i > 0; i-- {
+		res, err = m.readRegistry(ctx, BankAddr[m.bank][IOCONB])
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return res, fmt.Errorf("could not read gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
+	}
+	return res, fmt.Errorf("could not read gpio B set (retry limit reached): %w", err)
+}
+
+// WriteSettingsA sets up pull up resistors on set A
+func (m *MCP23017) WriteSettingsB(ctx context.Context, settings byte) error {
+	var err error
+	for i := m.retryLimit; i > 0; i-- {
+		err = m.transport.WriteToAddr(ctx, m.address, []byte{BankAddr[m.bank][IOCONB], settings})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sensors.ErrBusBusy) {
+			return fmt.Errorf("could not write settings on gpio B set: %w", err)
+		}
+		// try to release the bus
+		_ = m.transport.Release(ctx)
+	}
+	return fmt.Errorf("could not write settings on gpio B set (retry limit reached): %w", err)
 }

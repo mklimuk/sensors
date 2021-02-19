@@ -75,7 +75,7 @@ fmt:
 
 LD_FLAGS:=-s -w -X github.com/mklimuk/sensors/cmd/sensors.version=$(VERSION) -X github.com/mklimuk/sensors/cmd/sensors.commit=$(GITCOMMIT) -X github.com/mklimuk/sensors/cmd/sensors.date=$(BUILDTIME)
 
-.PHONY: build
+.PHONY: compile
 compile: dirs
 	GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN_LOCAL) -v $(SENSORS_SRC)
 
