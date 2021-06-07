@@ -1,7 +1,7 @@
 version: '2'
 services:
   sensors_linux_x64:
-    image: "mklimuk/gobuild:1.13"
+    image: "mklimuk/gobuild:1.16"
     volumes:
       - .:/src/sensors
       - $GOPATH/pkg/mod/cache/download:/go/pkg/mod/cache/download

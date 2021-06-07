@@ -73,7 +73,7 @@ var motionCheckCmd = cli.Command{
 				if err != nil {
 					console.Errorf("error checking motion detection on BMA220: %s", console.Red(err))
 				}
-				if motion {
+				if motion == 0x01 {
 					console.Printf("motion interrupt: %s\n", console.Yellow(motion))
 				} else {
 					console.Printf("motion interrupt: %s\n", console.Green(motion))

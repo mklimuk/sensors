@@ -16,8 +16,8 @@ import (
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 )
 
-const vendorID = 0x04D8
-const productID = 0x00DD
+const VendorID = 0x04D8
+const ProductID = 0x00DD
 
 var ErrCommandUnsupported = errors.New("unsupported command")
 var ErrCommandFailed = errors.New("command failed")
@@ -317,7 +317,7 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 }
 
 func (d *MCP2221) send(ctx context.Context, response bool) error {
-	devs := hid.Enumerate(vendorID, productID)
+	devs := hid.Enumerate(VendorID, ProductID)
 	if len(devs) > 1 {
 		return fmt.Errorf("ambiguous device identification")
 	}
@@ -328,7 +328,12 @@ func (d *MCP2221) send(ctx context.Context, response bool) error {
 	if err != nil {
 		return fmt.Errorf("error opening device: %w", err)
 	}
-	defer dev.Close()
+	defer func() {
+		err := dev.Close()
+		if err != nil {
+
+		}
+	}()
 	verbose := console.IsVerbose(ctx)
 	if verbose {
 		console.Printf("sending message to adapter:\n%s\n", hex.Dump(d.request))
