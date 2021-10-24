@@ -193,6 +193,14 @@ func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParam
 	return nil
 }
 
+func (d *MCP2221) Read(ctx context.Context) ([]byte, error) {
+	res, err := d.ReadGPIO(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []byte{res.GPIO0Value, res.GPIO1Value, res.GPIO2Value, res.GPIO3Value}, nil
+}
+
 func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
