@@ -193,20 +193,20 @@ func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParam
 	return nil
 }
 
-func (d *MCP2221) Read(ctx context.Context) ([]byte, error) {
-	res, err := d.ReadGPIO(ctx)
+func (d *MCP2221) Read(ctx context.Context, id ...int) ([]byte, error) {
+	res, err := d.ReadGPIO(ctx, id...)
 	if err != nil {
 		return nil, err
 	}
 	return []byte{res.GPIO0Value, res.GPIO1Value, res.GPIO2Value, res.GPIO3Value}, nil
 }
 
-func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
+func (d *MCP2221) ReadGPIO(ctx context.Context, id ...int) (MCP2221GPIOValues, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
 	d.resetBuffers()
 	d.request[0] = 0x51
-	err := d.send(ctx, true)
+	err := d.send(ctx, true, id...)
 	var res MCP2221GPIOValues
 	if err != nil {
 		return res, fmt.Errorf("read GPIO values command write failed: %w", err)
@@ -324,22 +324,37 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 	return bufferToStatus(d.response), nil
 }
 
-func (d *MCP2221) send(ctx context.Context, response bool) error {
+func (d *MCP2221) send(ctx context.Context, response bool, id ...int) error {
 	devs := hid.Enumerate(VendorID, ProductID)
-	if len(devs) > 1 {
+	if len(devs) > 1 && len(id) == 0 {
 		return fmt.Errorf("ambiguous device identification")
 	}
 	if len(devs) == 0 {
 		return fmt.Errorf("MCP2221 device not found")
 	}
-	dev, err := devs[0].Open()
-	if err != nil {
-		return fmt.Errorf("error opening device: %w", err)
+	var dev *hid.Device
+	var err error
+	if len(id) == 0 {
+		dev, err = devs[0].Open()
+		if err != nil {
+			return fmt.Errorf("error opening device: %w", err)
+		}
+	} else {
+		for d := range devs {
+			if d == id[0] {
+				dev, err = devs[0].Open()
+				if err != nil {
+					return fmt.Errorf("error opening device: %w", err)
+				}
+			}
+		}
+		if dev == nil {
+			return fmt.Errorf("no device with id %d", id[0])
+		}
 	}
 	defer func() {
 		err := dev.Close()
 		if err != nil {
-
 		}
 	}()
 	verbose := console.IsVerbose(ctx)
