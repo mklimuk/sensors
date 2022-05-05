@@ -19,6 +19,36 @@ import (
 const VendorID = 0x04D8
 const ProductID = 0x00DD
 
+type GPIODesignation byte
+
+const (
+	GPIOOperation GPIODesignation = 0b00000000
+	// This is alternate function of GPIO0
+	GPIO0LedUartRx GPIODesignation = 0b00000001
+	// This is the dedicated function operation of GPIO0
+	GPIO0SSPND GPIODesignation = 0b00000010
+	// This is the dedicated function of GPIO1
+	GPIO1ClockOutput GPIODesignation = 0b00000001
+	// This is the alternate function 0 of GPIO1
+	GPIO1ADC1 GPIODesignation = 0b00000010
+	// This is the alternate function 1 of GPIO1
+	GPIO1LedUartTx GPIODesignation = 0b00000011
+	// This is the alternate function 2 of GPIO1
+	GPIO1InterruptDetection GPIODesignation = 0b00000100
+	// This is the dedicated function of GPIO2
+	GPIO2ClockOutput GPIODesignation = 0b00000001
+	// This is the alternate function 0 of GPIO2
+	GPIO2ADC2 GPIODesignation = 0b00000010
+	// This is the alternate function 1 of GPIO2
+	GPIO2DAC1 GPIODesignation = 0b00000011
+	// This is the dedicated function of GPIO3
+	GPIO3LEDI2C GPIODesignation = 0b00000001
+	// This is the alternate function 0 of GPIO3
+	GPIO3ADC3 GPIODesignation = 0b00000010
+	// This is the alternate function 1 of GPIO3
+	GPIO3DAC2 GPIODesignation = 0b00000011
+)
+
 var ErrCommandUnsupported = errors.New("unsupported command")
 var ErrCommandFailed = errors.New("command failed")
 
@@ -27,6 +57,8 @@ type MCP2221 struct {
 	request      []byte
 	response     []byte
 	responseWait time.Duration
+	vendorID     uint16
+	productID    uint16
 }
 
 type MCP2221Status struct {
@@ -58,48 +90,18 @@ func (m GPIOMode) String() string {
 	}
 }
 
-type GPIODesignation byte
-
-const (
-	GPIOOperation GPIODesignation = 0b00000000
-	// This is alternate function of GPIO0
-	GPIO0LedUartRx GPIODesignation = 0b00000001
-	// This is the dedicated function operation of GPIO0
-	GPIO0SSPND GPIODesignation = 0b00000010
-	// This is the dedicated function of GPIO1
-	GPIO1ClockOutput GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO1
-	GPIO1ADC1 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO1
-	GPIO1LedUartTx GPIODesignation = 0b00000011
-	// This is the alternate function 2 of GPIO1
-	GPIO1InterruptDetection GPIODesignation = 0b00000100
-	// This is the dedicated function of GPIO2
-	GPIO2ClockOutput GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO2
-	GPIO2ADC2 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO2
-	GPIO2DAC1 GPIODesignation = 0b00000011
-	// This is the dedicated function of GPIO3
-	GPIO3LEDI2C GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO3
-	GPIO3ADC3 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO3
-	GPIO3DAC2 GPIODesignation = 0b00000011
-)
-
 const gpioModeMask = 0b00001000
 const gpioOperationMask = 0b00000111
 
 type MCP2221GPIOValues struct {
-	GPIO0Mode  GPIOMode `yaml:"GP0_mode"`
-	GPIO0Value byte     `yaml:"GPIO0"`
-	GPIO1Mode  GPIOMode `yaml:"GP1_mode"`
-	GPIO1Value byte     `yaml:"GPIO1"`
-	GPIO2Mode  GPIOMode `yaml:"GP2_mode"`
-	GPIO2Value byte     `yaml:"GPIO2"`
-	GPIO3Mode  GPIOMode `yaml:"GP3_mode"`
-	GPIO3Value byte     `yaml:"GPIO3"`
+	GPIO0Mode  GPIOMode `json:"gp0_mode" yaml:"GP0_mode"`
+	GPIO0Value byte     `json:"gp0" yaml:"GPIO0"`
+	GPIO1Mode  GPIOMode `json:"gp1_mode" yaml:"GP1_mode"`
+	GPIO1Value byte     `json:"gp1" yaml:"GPIO1"`
+	GPIO2Mode  GPIOMode `json:"gp2_mode" yaml:"GP2_mode"`
+	GPIO2Value byte     `json:"gp2" yaml:"GPIO2"`
+	GPIO3Mode  GPIOMode `json:"gp3_mode" yaml:"GP3_mode"`
+	GPIO3Value byte     `json:"gp3" yaml:"GPIO3"`
 }
 
 type MCP2221GPIOParameters struct {
@@ -118,7 +120,14 @@ func NewMCP2221() *MCP2221 {
 		request:      make([]byte, 64),
 		response:     make([]byte, 64),
 		responseWait: 50 * time.Millisecond,
+		vendorID:     VendorID,
+		productID:    ProductID,
 	}
+}
+
+func (d *MCP2221) SetVendorAndProductID(vendor, product uint16) {
+	d.vendorID = vendor
+	d.productID = product
 }
 
 func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
@@ -169,6 +178,87 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 	}
 
 	copy(buffer, d.response[4:])
+	return nil
+}
+
+func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.resetBuffers()
+	d.request[0] = 0xB0
+	err := d.send(ctx, true)
+	if err != nil {
+		return fmt.Errorf("read CHIP parameters command write failed: %w", err)
+	}
+	// read could not be performed
+	if d.response[1] == 0x01 {
+		return ErrCommandFailed
+	}
+	dump("chip settings:", d.response[:14])
+	return nil
+}
+
+func (d *MCP2221) ReadGPIOSettings(ctx context.Context) error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.resetBuffers()
+	d.request[0] = 0xB0
+	d.request[1] = 0x01
+	err := d.send(ctx, true)
+	if err != nil {
+		return fmt.Errorf("read gpio parameters command write failed: %w", err)
+	}
+	// read could not be performed
+	if d.response[1] == 0x01 {
+		return ErrCommandFailed
+	}
+	dump("gpio settings:", d.response[:14])
+	return nil
+}
+
+func dump(description string, value []byte) {
+	fmt.Println(description)
+	for i, b := range value {
+		fmt.Printf("%d | %08b | %#02x\n", i, b, b)
+	}
+}
+
+func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product []byte, dryrun ...bool) error {
+	for len(vendor) < 2 {
+		vendor = append(vendor, 0x00)
+	}
+	for len(product) < 2 {
+		product = append(product, 0x00)
+	}
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.resetBuffers()
+	d.request[0] = 0xB1 // command
+	d.request[1] = 0x00 // subcommand
+	//d.request[2] = 0xFC // set usb CDC serial number
+	d.request[2] = 0x7C // set usb CDC serial number
+	d.request[3] = 0x12 // clock divider
+	d.request[4] = 0x88 // reference voltage DAC
+	d.request[5] = 0x6F // reference voltage ADC
+	d.request[6] = vendor[1]
+	d.request[7] = vendor[0]
+	d.request[8] = product[1]
+	d.request[9] = product[0]
+	d.request[10] = 0x80 // usb power attributes
+	d.request[11] = 0x32 // usb requested mA value
+
+	if len(dryrun) > 0 && dryrun[0] {
+		dump("sent chip settings:", d.request[:12])
+		return nil
+	}
+	err := d.send(ctx, true)
+	if err != nil {
+		return fmt.Errorf("write CHIP parameters command write failed: %w", err)
+	}
+	// read could not be performed
+	if d.response[1] == 0x01 {
+		return ErrCommandFailed
+	}
 	return nil
 }
 
@@ -325,7 +415,7 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 }
 
 func (d *MCP2221) send(ctx context.Context, response bool, id ...int) error {
-	devs := hid.Enumerate(VendorID, ProductID)
+	devs := hid.Enumerate(d.vendorID, d.productID)
 	if len(devs) > 1 && len(id) == 0 {
 		return fmt.Errorf("ambiguous device identification")
 	}
