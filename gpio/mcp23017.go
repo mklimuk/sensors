@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/mklimuk/sensors"
 )
@@ -86,12 +87,15 @@ var (
 	}
 )
 
-/* Steps to read GPIO:
+/*
+	Steps to read GPIO:
+
 1. Set 0xFF to IODIR registry (all inputs) - 0x00(A)/0x01(B)
 2. Configure pull-up? 0x06
 3. Read port register 0x09
 */
 type MCP23017 struct {
+	mx         sync.Mutex
 	transport  sensors.I2CBus
 	bank       int
 	address    byte
@@ -137,6 +141,8 @@ func (m *MCP23017) InitB(ctx context.Context, inout byte) error {
 }
 
 func (m MCP23017) readRegistry(ctx context.Context, addr byte) (byte, error) {
+	m.mx.Lock()
+	defer m.mx.Unlock()
 	err := m.transport.WriteToAddr(ctx, m.address, []byte{addr})
 	if err != nil {
 		return 0x00, fmt.Errorf("could not set I/O registry address: %w", err)
