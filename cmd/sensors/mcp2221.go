@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -17,6 +18,7 @@ var mcp2221Cmd = cli.Command{
 		mcp2221StatusCmd,
 		mcp2221ReleaseCmd,
 		mcp2221GPIOCmd,
+		mcp2221ResetCmd,
 	},
 }
 
@@ -34,6 +36,15 @@ var mcp2221StatusCmd = cli.Command{
 		}
 		enc := yaml.NewEncoder(os.Stdout)
 		err = enc.Encode(status)
+		if err != nil {
+			return console.Exit(1, "encoding error: %s", console.Red(err))
+		}
+		settings, err := a.GetGPIOParameters(ctx)
+		if err != nil {
+			return console.Exit(1, "could not read gpio parameters: %s", console.Red(err))
+		}
+		fmt.Println("GPIO settings:")
+		err = enc.Encode(settings)
 		if err != nil {
 			return console.Exit(1, "encoding error: %s", console.Red(err))
 		}
@@ -57,6 +68,22 @@ var mcp2221ReleaseCmd = cli.Command{
 		err = enc.Encode(status)
 		if err != nil {
 			return console.Exit(1, "encoding error: %s", console.Red(err))
+		}
+		return nil
+	},
+}
+
+var mcp2221ResetCmd = cli.Command{
+	Name: "reset",
+	Flags: []cli.Flag{
+		cli.BoolFlag{Name: "verbose,v"},
+	},
+	Action: func(c *cli.Context) error {
+		a := adapter.NewMCP2221()
+		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		err := a.Reset(ctx)
+		if err != nil {
+			return console.Exit(1, "adapter communication error: %s", console.Red(err))
 		}
 		return nil
 	},

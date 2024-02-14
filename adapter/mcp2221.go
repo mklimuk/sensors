@@ -366,6 +366,21 @@ func (d *MCP2221) Status(ctx context.Context) (*MCP2221Status, error) {
 	return bufferToStatus(d.response), nil
 }
 
+func (d *MCP2221) Reset(ctx context.Context) error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.resetBuffers()
+	d.request[0] = 0x70
+	d.request[1] = 0xAB
+	d.request[2] = 0xCD
+	d.request[3] = 0xEF
+	err := d.send(ctx, false)
+	if err != nil {
+		return fmt.Errorf("reset request failed: %w", err)
+	}
+	return nil
+}
+
 func bufferToStatus(buffer []byte) *MCP2221Status {
 	/*
 		9: Lower byte (16-bit value) of the requested I2C transfer length
