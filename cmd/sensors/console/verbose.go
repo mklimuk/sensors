@@ -7,7 +7,7 @@ type ctxIndex int
 const ctxIndexVerbose ctxIndex = iota
 
 func SetVerbose(parent context.Context, value bool) context.Context {
-		return context.WithValue(parent, ctxIndexVerbose, value)
+	return context.WithValue(parent, ctxIndexVerbose, value)
 }
 
 func IsVerbose(ctx context.Context) bool {

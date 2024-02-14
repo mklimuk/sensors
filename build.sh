@@ -20,13 +20,13 @@ EOF
   echo \\n"$help"\\n
 }
 
-docker-compose -f compile.yml --log-level ERROR up
+docker compose -f compile.yml up
 RET=$?
 if [[ $RET -eq 0 ]]; then
   echo "Compiling ... ${FG_GREEN}done${NORM}"
 else
   echo "Compiling ... ${FG_RED}error:$RET${NORM}"
-  docker-compose -f compile.yml --log-level ERROR rm -vf
+  docker compose -f compile.yml rm -vf
   popd > /dev/null
   exit 1
 fi
