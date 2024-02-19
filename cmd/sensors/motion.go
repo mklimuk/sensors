@@ -7,30 +7,30 @@ import (
 
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var motionCmd = cli.Command{
 	Name: "motion",
 	Subcommands: cli.Commands{
-		motionInitCmd,
-		motionCheckCmd,
-		motionResetCmd,
+		&motionInitCmd,
+		&motionCheckCmd,
+		&motionResetCmd,
 	},
 }
 
 var motionInitCmd = cli.Command{
 	Name: "init",
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "adapter,a",
 			Value: "mcp2221",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "sensor,s",
 			Value: "bma220",
 		},
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
@@ -52,15 +52,15 @@ var motionInitCmd = cli.Command{
 var motionCheckCmd = cli.Command{
 	Name: "check",
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "adapter,a",
 			Value: "mcp2221",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "sensor,s",
 			Value: "bma220",
 		},
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
@@ -68,7 +68,12 @@ var motionCheckCmd = cli.Command{
 		case "bma220":
 			switch c.String("adapter") {
 			case "mcp2221":
-				s := accel.NewBMA220(adapter.NewMCP2221())
+				a := adapter.NewMCP2221()
+				err := a.Init()
+				if err != nil {
+					return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+				}
+				s := accel.NewBMA220(a)
 				motion, err := s.CheckMotionInterrupt(ctx)
 				if err != nil {
 					console.Errorf("error checking motion detection on BMA220: %s", console.Red(err))
@@ -87,15 +92,15 @@ var motionCheckCmd = cli.Command{
 var motionResetCmd = cli.Command{
 	Name: "reset",
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "adapter,a",
 			Value: "mcp2221",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "sensor,s",
 			Value: "bma220",
 		},
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
@@ -103,8 +108,13 @@ var motionResetCmd = cli.Command{
 		case "bma220":
 			switch c.String("adapter") {
 			case "mcp2221":
-				s := accel.NewBMA220(adapter.NewMCP2221())
-				err := s.ResetMotionInterrupt(ctx)
+				a := adapter.NewMCP2221()
+				err := a.Init()
+				if err != nil {
+					return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+				}
+				s := accel.NewBMA220(a)
+				err = s.ResetMotionInterrupt(ctx)
 				if err != nil {
 					console.Errorf("error resetting motion detection on BMA220: %s", console.Red(err))
 				}

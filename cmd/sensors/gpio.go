@@ -9,16 +9,16 @@ import (
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/gpio"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var gpioCmd = cli.Command{
 	Name: "gpio",
-	Subcommands: []cli.Command{
-		gpioStatusCmd,
-		gpioReadCmd,
-		gpioConfigureCmd,
-		gpioPullCmd,
+	Subcommands: []*cli.Command{
+		&gpioStatusCmd,
+		&gpioReadCmd,
+		&gpioConfigureCmd,
+		&gpioPullCmd,
 	},
 }
 
@@ -32,7 +32,12 @@ var gpioReadCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "could not decode address: %v", err)
 		}
-		exp := gpio.NewMCP23017(adapter.NewMCP2221(), bytes[0])
+		mcp2221 := adapter.NewMCP2221()
+		err = mcp2221.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
+		exp := gpio.NewMCP23017(mcp2221, bytes[0])
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.InitA(ctx, 0xFF)
@@ -63,7 +68,12 @@ var gpioStatusCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "could not decode address: %v", err)
 		}
-		exp := gpio.NewMCP23017(adapter.NewMCP2221(), bytes[0])
+		a := adapter.NewMCP2221()
+		err = a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
+		exp := gpio.NewMCP23017(a, bytes[0])
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		data, err := exp.ReadSettingsA(ctx)
@@ -89,7 +99,12 @@ var gpioConfigureCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "could not decode data: %v", err)
 		}
-		exp := gpio.NewMCP23017(adapter.NewMCP2221(), addr[0])
+		a := adapter.NewMCP2221()
+		err = a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
+		exp := gpio.NewMCP23017(a, addr[0])
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.WriteSettingsA(ctx, data[0])
@@ -115,7 +130,12 @@ var gpioPullCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "could not decode data: %v", err)
 		}
-		exp := gpio.NewMCP23017(adapter.NewMCP2221(), addr[0])
+		a := adapter.NewMCP2221()
+		err = a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
+		exp := gpio.NewMCP23017(a, addr[0])
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.PullUpA(ctx, data[0])

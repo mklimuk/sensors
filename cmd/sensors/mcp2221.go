@@ -8,27 +8,31 @@ import (
 
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 )
 
 var mcp2221Cmd = cli.Command{
 	Name: "mcp2221",
 	Subcommands: cli.Commands{
-		mcp2221StatusCmd,
-		mcp2221ReleaseCmd,
-		mcp2221GPIOCmd,
-		mcp2221ResetCmd,
+		&mcp2221StatusCmd,
+		&mcp2221ReleaseCmd,
+		&mcp2221GPIOCmd,
+		&mcp2221ResetCmd,
 	},
 }
 
 var mcp2221StatusCmd = cli.Command{
 	Name: "status",
 	Flags: []cli.Flag{
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		a := adapter.NewMCP2221()
+		err := a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
 		status, err := a.Status(ctx)
 		if err != nil {
@@ -55,10 +59,14 @@ var mcp2221StatusCmd = cli.Command{
 var mcp2221ReleaseCmd = cli.Command{
 	Name: "release",
 	Flags: []cli.Flag{
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		a := adapter.NewMCP2221()
+		err := a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
 		status, err := a.ReleaseBus(ctx)
 		if err != nil {
@@ -76,12 +84,16 @@ var mcp2221ReleaseCmd = cli.Command{
 var mcp2221ResetCmd = cli.Command{
 	Name: "reset",
 	Flags: []cli.Flag{
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		a := adapter.NewMCP2221()
+		err := a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
-		err := a.Reset(ctx)
+		err = a.Reset(ctx)
 		if err != nil {
 			return console.Exit(1, "adapter communication error: %s", console.Red(err))
 		}
@@ -92,22 +104,26 @@ var mcp2221ResetCmd = cli.Command{
 var mcp2221GPIOCmd = cli.Command{
 	Name: "gpio",
 	Flags: []cli.Flag{
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Subcommands: cli.Commands{
-		mcp2221GPIOReadCmd,
+		&mcp2221GPIOReadCmd,
 	},
 }
 
 var mcp2221GPIOReadCmd = cli.Command{
 	Name: "read",
 	Flags: []cli.Flag{
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		a := adapter.NewMCP2221()
+		err := a.Init()
+		if err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
-		err := a.SetGPIOParameters(ctx, adapter.MCP2221GPIOParameters{
+		err = a.SetGPIOParameters(ctx, adapter.MCP2221GPIOParameters{
 			GPIO0Mode: adapter.GPIOModeIn,
 			GPIO1Mode: adapter.GPIOModeIn,
 			GPIO2Mode: adapter.GPIOModeIn,

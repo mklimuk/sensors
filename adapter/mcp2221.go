@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/mklimuk/sensors"
 
-	"github.com/karalabe/hid"
+	"github.com/sstallion/go-hid"
 
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 )
@@ -23,42 +24,61 @@ type GPIODesignation byte
 
 const (
 	GPIOOperation GPIODesignation = 0b00000000
-	// This is alternate function of GPIO0
+	// GPIO0LedUartRx This is alternate function of GPIO0
 	GPIO0LedUartRx GPIODesignation = 0b00000001
-	// This is the dedicated function operation of GPIO0
+	// GPIO0SSPND This is the dedicated function operation of GPIO0
 	GPIO0SSPND GPIODesignation = 0b00000010
-	// This is the dedicated function of GPIO1
+	// GPIO1ClockOutput This is the dedicated function of GPIO1
 	GPIO1ClockOutput GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO1
+	// GPIO1ADC1 This is the alternate function 0 of GPIO1
 	GPIO1ADC1 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO1
+	// GPIO1LedUartTx This is the alternate function 1 of GPIO1
 	GPIO1LedUartTx GPIODesignation = 0b00000011
-	// This is the alternate function 2 of GPIO1
+	// GPIO1InterruptDetection This is the alternate function 2 of GPIO1
 	GPIO1InterruptDetection GPIODesignation = 0b00000100
-	// This is the dedicated function of GPIO2
+	// GPIO2ClockOutput This is the dedicated function of GPIO2
 	GPIO2ClockOutput GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO2
+	// GPIO2ADC2 This is the alternate function 0 of GPIO2
 	GPIO2ADC2 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO2
+	// GPIO2DAC1 This is the alternate function 1 of GPIO2
 	GPIO2DAC1 GPIODesignation = 0b00000011
-	// This is the dedicated function of GPIO3
+	// GPIO3LEDI2C This is the dedicated function of GPIO3
 	GPIO3LEDI2C GPIODesignation = 0b00000001
-	// This is the alternate function 0 of GPIO3
+	// GPIO3ADC3 This is the alternate function 0 of GPIO3
 	GPIO3ADC3 GPIODesignation = 0b00000010
-	// This is the alternate function 1 of GPIO3
+	// GPIO3DAC2 This is the alternate function 1 of GPIO3
 	GPIO3DAC2 GPIODesignation = 0b00000011
 )
 
 var ErrCommandUnsupported = errors.New("unsupported command")
 var ErrCommandFailed = errors.New("command failed")
+var ErrI2CStatusTimeout = errors.New("i2c status check timeout")
+var ErrI2CAddressMismatch = errors.New("i2c address mismatch")
+
+const (
+	StatusNew = iota
+	StatusInitialized
+	StatusConnecting
+	StatusConnected
+)
+
+var (
+	chipDelay = 5 * time.Millisecond
+	i2cDelay  = 50 * time.Millisecond
+	maxDelay  = 75 * time.Millisecond
+)
 
 type MCP2221 struct {
-	mx           sync.Mutex
-	request      []byte
-	response     []byte
-	responseWait time.Duration
-	vendorID     uint16
-	productID    uint16
+	mx             sync.Mutex
+	request        []byte
+	response       []byte
+	responseWait   time.Duration
+	vendorID       uint16
+	productID      uint16
+	device         *hid.Device
+	reconnectDelay time.Duration
+	reconnectChan  chan struct{}
+	status         int
 }
 
 type MCP2221Status struct {
@@ -66,8 +86,9 @@ type MCP2221Status struct {
 	I2CSpeedDivider        int
 	I2CTimeout             int
 	CurrentAddress         string
-	LastWriteRequestedSize uint16
-	LastWriteSentSize      uint16
+	I2CAddress             byte
+	LastI2CRequestedSize   uint16
+	LastI2CTransferredSize uint16
 	ReadPending            int
 }
 
@@ -117,11 +138,97 @@ type MCP2221GPIOParameters struct {
 
 func NewMCP2221() *MCP2221 {
 	return &MCP2221{
-		request:      make([]byte, 64),
-		response:     make([]byte, 64),
-		responseWait: 50 * time.Millisecond,
-		vendorID:     VendorID,
-		productID:    ProductID,
+		request:        make([]byte, 64),
+		response:       make([]byte, 64),
+		responseWait:   50 * time.Millisecond,
+		vendorID:       VendorID,
+		productID:      ProductID,
+		reconnectDelay: 5 * time.Second,
+	}
+}
+
+func (d *MCP2221) Init() error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	err := hid.Init()
+	if err != nil {
+		return fmt.Errorf("could not init hid: %w", err)
+	}
+	d.status = StatusConnecting
+	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
+	if err != nil {
+		d.status = StatusInitialized
+		return fmt.Errorf("could not open hid device: %w", err)
+	}
+	d.status = StatusConnected
+	return nil
+}
+
+func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
+	err := hid.Init()
+	if err != nil {
+		return fmt.Errorf("could not init HID: %w", err)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// initialize the channel
+		d.mx.Lock()
+		d.reconnectChan = make(chan struct{})
+		defer close(d.reconnectChan)
+		d.status = StatusInitialized
+		d.mx.Unlock()
+		for {
+			d.mx.Lock()
+			d.status = StatusConnecting
+			d.device, err = hid.OpenFirst(d.vendorID, d.productID)
+			if err == nil {
+				d.status = StatusConnected
+				slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
+			}
+			d.mx.Unlock()
+			if err != nil {
+				slog.Error("could not open hid device", "vendor", d.vendorID, "product", d.productID, "err", err)
+				slog.Info("waiting to reconnect hid device", "delay", d.reconnectDelay)
+				select {
+				case <-time.After(d.reconnectDelay):
+					continue
+				case <-ctx.Done():
+					slog.Info("closing device and exiting hid reconnect loop")
+					err := d.device.Close()
+					if err != nil {
+						slog.Info("error closing hid device", "err", err)
+					}
+					return
+				}
+			}
+			// wait for reconnect event or context cancellation
+			select {
+			case <-d.reconnectChan:
+				slog.Info("reconnect signal received")
+			case <-ctx.Done():
+				slog.Info("closing device and exiting hid reconnect loop")
+				err := d.device.Close()
+				if err != nil {
+					slog.Info("error closing hid device", "err", err)
+				}
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+func (d *MCP2221) reconnect() {
+	if d.reconnectChan == nil {
+		slog.Warn("reconnect channel not initialized")
+		return
+	}
+	select {
+	case d.reconnectChan <- struct{}{}:
+		slog.Info("reconnect signal sent")
+	default:
+		slog.Info("reconnect in progress")
 	}
 }
 
@@ -136,18 +243,25 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	d.resetBuffers()
 	d.request[0] = 0x90
 	binary.LittleEndian.PutUint16(d.request[1:3], uint16(len(buffer)))
-	d.request[3] = address << 1
+	addr := address << 1
+	d.request[3] = addr
 	if len(buffer) > 0 {
 		copy(d.request[4:], buffer)
 	}
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("write to %x failed: %w", address, err)
+		return fmt.Errorf("i2c write to %x request write failed: %w", address, err)
+	}
+	err = d.waitAndReceive(ctx, chipDelay)
+	if err != nil {
+		return fmt.Errorf("i2c write to %x response read failed: %w", address, err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
-		console.Debug("adapter busy")
-		return sensors.ErrBusBusy
+		_, err = d.releaseBus(ctx)
+		if err != nil {
+			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
+		}
 	}
 	return nil
 }
@@ -156,22 +270,40 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 	d.mx.Lock()
 	defer d.mx.Unlock()
 	d.resetBuffers()
+	// send i2c read request
 	d.request[0] = 0x91
 	binary.LittleEndian.PutUint16(d.request[1:3], uint16(len(buffer)))
-	d.request[3] = address<<1 + 1
-	err := d.send(ctx, true)
+	addr := address<<1 + 1
+	d.request[3] = addr
+	err := d.send(ctx)
 	// we iterated several times with no result
 	if err != nil {
-		return fmt.Errorf("bus read from %x failed: %w", address, err)
+		return fmt.Errorf("i2c read from %x request failed: %w", address, err)
 	}
+	err = d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("i2c read from %x response receive failed: %w", address, err)
+	}
+	if d.response[1] == 0x01 {
+		_, err = d.releaseBus(ctx)
+		if err != nil {
+			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
+		}
+		return sensors.ErrBusBusy
+	}
+	// read i2c data
 	d.request[0] = 0x40
 	resetBuffer(d.response)
-	err = d.send(ctx, true)
+	err = d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("error getting read data from adapter: %w", err)
+		return fmt.Errorf("error getting i2c read data from adapter: %w", err)
+	}
+	err = d.waitAndReceive(ctx, chipDelay)
+	if err != nil {
+		return fmt.Errorf("i2c read from %x response receive failed: %w", address, err)
 	}
 	if d.response[1] == 0x41 {
-		return fmt.Errorf("error reading the I2C slave data from the I2C engine")
+		return fmt.Errorf("error reading the i2c slave data from the i2c engine")
 	}
 	if d.response[3] == 127 || int(d.response[3]) != len(buffer) {
 		return fmt.Errorf("invalid data size byte; expected %d, got %d", len(buffer), d.response[3])
@@ -186,9 +318,13 @@ func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
 	defer d.mx.Unlock()
 	d.resetBuffers()
 	d.request[0] = 0xB0
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("read CHIP parameters command write failed: %w", err)
+		return fmt.Errorf("read chip parameters command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("read chip parameters command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -204,9 +340,13 @@ func (d *MCP2221) ReadGPIOSettings(ctx context.Context) error {
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("read gpio parameters command write failed: %w", err)
+		return fmt.Errorf("read gpio parameters command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("read gpio parameters command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -251,9 +391,13 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 		dump("sent chip settings:", d.request[:12])
 		return nil
 	}
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("write CHIP parameters command write failed: %w", err)
+		return fmt.Errorf("write chip parameters command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("write chip parameters command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -272,9 +416,13 @@ func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParam
 	d.request[3] = byte(params.GPIO1Designation) | byte(params.GPIO1Mode)
 	d.request[4] = byte(params.GPIO2Designation) | byte(params.GPIO2Mode)
 	d.request[5] = byte(params.GPIO3Designation) | byte(params.GPIO3Mode)
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return fmt.Errorf("set GP parameters command write failed: %w", err)
+		return fmt.Errorf("set GP parameters command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("set GP parameters command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -283,23 +431,27 @@ func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParam
 	return nil
 }
 
-func (d *MCP2221) Read(ctx context.Context, id ...int) ([]byte, error) {
-	res, err := d.ReadGPIO(ctx, id...)
+func (d *MCP2221) Read(ctx context.Context) ([]byte, error) {
+	res, err := d.ReadGPIO(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return []byte{res.GPIO0Value, res.GPIO1Value, res.GPIO2Value, res.GPIO3Value}, nil
 }
 
-func (d *MCP2221) ReadGPIO(ctx context.Context, id ...int) (MCP2221GPIOValues, error) {
+func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
 	d.resetBuffers()
 	d.request[0] = 0x51
-	err := d.send(ctx, true, id...)
+	err := d.send(ctx)
 	var res MCP2221GPIOValues
 	if err != nil {
-		return res, fmt.Errorf("read GPIO values command write failed: %w", err)
+		return res, fmt.Errorf("read GPIO values command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return res, fmt.Errorf("read GPIO values command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -334,9 +486,13 @@ func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters,
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return MCP2221GPIOParameters{}, fmt.Errorf("get GP parameters command write failed: %w", err)
+		return MCP2221GPIOParameters{}, fmt.Errorf("get GP parameters command request write failed: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return MCP2221GPIOParameters{}, fmt.Errorf("get GP parameters command response read failed: %w", err)
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
@@ -357,11 +513,19 @@ func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters,
 func (d *MCP2221) Status(ctx context.Context) (*MCP2221Status, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	return d.doGetStatus(ctx)
+}
+
+func (d *MCP2221) doGetStatus(ctx context.Context) (*MCP2221Status, error) {
 	d.resetBuffers()
 	d.request[0] = 0x10
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("status request failed: %w", err)
+		return nil, fmt.Errorf("could not send status request: %w", err)
+	}
+	err = d.receive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not receive status: %w", err)
 	}
 	return bufferToStatus(d.response), nil
 }
@@ -374,7 +538,7 @@ func (d *MCP2221) Reset(ctx context.Context) error {
 	d.request[1] = 0xAB
 	d.request[2] = 0xCD
 	d.request[3] = 0xEF
-	err := d.send(ctx, false)
+	err := d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("reset request failed: %w", err)
 	}
@@ -400,8 +564,9 @@ func bufferToStatus(buffer []byte) *MCP2221Status {
 		ReadPending:          int(buffer[25]),
 		CurrentAddress:       hex.EncodeToString(buffer[16:18]),
 	}
-	status.LastWriteRequestedSize = binary.LittleEndian.Uint16(buffer[9:11])
-	status.LastWriteSentSize = binary.LittleEndian.Uint16(buffer[11:13])
+	status.LastI2CRequestedSize = binary.LittleEndian.Uint16(buffer[9:11])
+	status.LastI2CTransferredSize = binary.LittleEndian.Uint16(buffer[11:13])
+	status.I2CAddress = buffer[16]
 	return status
 }
 
@@ -422,63 +587,76 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 	d.resetBuffers()
 	d.request[0] = 0x10
 	d.request[2] = 0x10
-	err := d.send(ctx, true)
+	err := d.send(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("status request failed: %w", err)
+		return nil, fmt.Errorf("release request failed: %w", err)
 	}
+	err = d.waitAndReceive(ctx, chipDelay)
 	return bufferToStatus(d.response), nil
 }
 
-func (d *MCP2221) send(ctx context.Context, response bool, id ...int) error {
-	devs := hid.Enumerate(d.vendorID, d.productID)
-	if len(devs) > 1 && len(id) == 0 {
-		return fmt.Errorf("ambiguous device identification")
-	}
-	if len(devs) == 0 {
-		return fmt.Errorf("MCP2221 device not found")
-	}
-	var dev *hid.Device
-	var err error
-	if len(id) == 0 {
-		dev, err = devs[0].Open()
-		if err != nil {
-			return fmt.Errorf("error opening device: %w", err)
-		}
-	} else {
-		for d := range devs {
-			if d == id[0] {
-				dev, err = devs[0].Open()
-				if err != nil {
-					return fmt.Errorf("error opening device: %w", err)
-				}
+func (d *MCP2221) waitForI2CTransfer(ctx context.Context, address byte) error {
+	timeout := time.NewTimer(maxDelay)
+	defer timeout.Stop()
+	tick := time.NewTicker(chipDelay)
+	defer tick.Stop()
+	for {
+		select {
+		case <-tick.C:
+			status, err := d.doGetStatus(ctx)
+			if err != nil {
+				slog.Error("could not get status", "err", err)
 			}
-		}
-		if dev == nil {
-			return fmt.Errorf("no device with id %d", id[0])
+			if status.I2CAddress != 0x00 && status.I2CAddress != address {
+				return fmt.Errorf("%w; expected %#x, got %#x", ErrI2CAddressMismatch, address, status.I2CAddress)
+			}
+			if status.LastI2CRequestedSize == status.LastI2CTransferredSize {
+				return nil
+			}
+		case <-timeout.C:
+			return ErrI2CStatusTimeout
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	defer func() {
-		err := dev.Close()
-		if err != nil {
-		}
-	}()
+}
+
+func (d *MCP2221) waitAndReceive(ctx context.Context, delay time.Duration) error {
+	select {
+	case <-time.After(delay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	err := d.receive(ctx)
+	if err != nil {
+		return fmt.Errorf("i2c receive failed: %w", err)
+	}
+	return nil
+}
+
+func (d *MCP2221) send(ctx context.Context) error {
 	verbose := console.IsVerbose(ctx)
 	if verbose {
-		console.Printf("sending message to adapter:\n%s\n", hex.Dump(d.request))
+		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
 	}
-	n, err := dev.Write(d.request)
+	n, err := d.device.Write(d.request)
 	if err != nil {
 		return fmt.Errorf("could not write request: %w", err)
 	}
 	if n != 64 {
 		return fmt.Errorf("short write: %d", n)
 	}
-	if !response {
-		return nil
+	return nil
+}
+
+// receive reads the response from the device
+func (d *MCP2221) receive(ctx context.Context) error {
+	verbose := console.IsVerbose(ctx)
+	if verbose {
+		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
 	}
-	time.Sleep(d.responseWait)
-	console.Debug("reading response from adapter")
-	n, err = dev.Read(d.response)
+	slog.Debug("reading response from adapter")
+	n, err := d.device.Read(d.response)
 	if err != nil {
 		return fmt.Errorf("could not read response: %w", err)
 	}

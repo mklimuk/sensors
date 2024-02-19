@@ -6,23 +6,22 @@ import (
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var tempReadCmd = cli.Command{
-	Name:      "temperature",
-	ShortName: "temp",
-	Aliases:   []string{"t"},
+	Name:    "temperature",
+	Aliases: []string{"temp"},
 	Flags: []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "adapter,a",
 			Value: "mcp2221",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "sensor,s",
 			Value: "hih6021",
 		},
-		cli.BoolFlag{Name: "verbose,v"},
+		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
@@ -30,7 +29,12 @@ var tempReadCmd = cli.Command{
 		case "hih6021":
 			switch c.String("adapter") {
 			case "mcp2221":
-				s := environment.NewHIH6021(adapter.NewMCP2221())
+				a := adapter.NewMCP2221()
+				err := a.Init()
+				if err != nil {
+					return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+				}
+				s := environment.NewHIH6021(a)
 				temp, hum, err := s.GetTempAndHum(ctx)
 				if err != nil {
 					console.Errorf("error getting temperature read: %s", console.Red(err))

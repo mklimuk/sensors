@@ -1,11 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var version string
@@ -23,15 +24,16 @@ func run() int {
 	app.Version = fmt.Sprintf("%s-%s-%s", version, date, commit)
 	app.Usage = "sensors cli"
 	app.Commands = cli.Commands{
-		tempReadCmd,
-		usbCmd,
-		mcp2221Cmd,
-		gpioCmd,
-		motionCmd,
+		&tempReadCmd,
+		&usbCmd,
+		&mcp2221Cmd,
+		&gpioCmd,
+		&motionCmd,
 	}
 	err := app.Run(os.Args)
 	if err != nil {
-		if exerr, ok := err.(cli.ExitCoder); ok {
+		var exerr cli.ExitCoder
+		if errors.As(err, &exerr) {
 			log.Printf("unexpected error: %v", err)
 			return exerr.ExitCode()
 		}
