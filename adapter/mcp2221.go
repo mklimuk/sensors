@@ -184,39 +184,25 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 	go func() {
 		defer wg.Done()
 		// initialize the channel
-		d.mx.Lock()
 		d.reconnectChan = make(chan struct{})
 		defer close(d.reconnectChan)
 		d.status = StatusInitialized
-		d.mx.Unlock()
+		d.connect()
+		tick := time.NewTicker(d.reconnectDelay)
 		for {
-			d.mx.Lock()
-			d.status = StatusConnecting
-			d.device, err = hid.OpenFirst(d.vendorID, d.productID)
-			if err == nil {
-				d.status = StatusConnected
-				slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
-			}
-			d.mx.Unlock()
-			if err != nil {
-				slog.Error("could not open hid device", "vendor", d.vendorID, "product", d.productID, "err", err)
-				slog.Info("waiting to reconnect hid device", "delay", d.reconnectDelay)
-				select {
-				case <-time.After(d.reconnectDelay):
-					continue
-				case <-ctx.Done():
-					slog.Info("closing device and exiting hid reconnect loop")
-					err := d.device.Close()
-					if err != nil {
-						slog.Info("error closing hid device", "err", err)
-					}
-					return
-				}
-			}
-			// wait for reconnect event or context cancellation
 			select {
+			// watchdog for the device
+			case <-tick.C:
+				d.mx.RLock()
+				if d.status == StatusConnected {
+					continue
+				}
+				d.mx.RUnlock()
+				slog.Info("device is disconnected; reconnecting", "vendor", d.vendorID, "product", d.productID)
+				d.connect()
 			case <-d.reconnectChan:
-				slog.Info("reconnect signal received")
+				slog.Info("reconnect signal received", "vendor", d.vendorID, "product", d.productID)
+				d.connect()
 			case <-ctx.Done():
 				slog.Info("closing device and exiting hid reconnect loop")
 				err := d.device.Close()
@@ -228,6 +214,21 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}()
 	return nil
+}
+
+func (d *MCP2221) connect() {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.status = StatusConnecting
+	var err error
+	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
+	if err == nil {
+		d.status = StatusConnected
+		slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
+		return
+	}
+	d.status = StatusInitialized
+	slog.Error("could not open hid device", "vendor", d.vendorID, "product", d.productID, "err", err)
 }
 
 func (d *MCP2221) Reconnect() error {
