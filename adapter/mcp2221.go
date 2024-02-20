@@ -154,7 +154,12 @@ func (d *MCP2221) Init() error {
 	if err != nil {
 		return fmt.Errorf("could not init hid: %w", err)
 	}
+	_ = hid.Enumerate(hid.ProductIDAny, hid.VendorIDAny, func(device *hid.DeviceInfo) error {
+		slog.Info("found hid device", "vendor", device.VendorID, "product", device.ProductID)
+		return nil
+	})
 	d.status = StatusConnecting
+	slog.Info("connecting to hid device", "vendor", d.vendorID, "product", d.productID)
 	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
 	if err != nil {
 		d.status = StatusInitialized
@@ -169,6 +174,10 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("could not init HID: %w", err)
 	}
+	_ = hid.Enumerate(hid.ProductIDAny, hid.VendorIDAny, func(device *hid.DeviceInfo) error {
+		slog.Info("found hid device", "vendor", device.VendorID, "product", device.ProductID)
+		return nil
+	})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
