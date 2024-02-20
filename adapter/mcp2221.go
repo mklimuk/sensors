@@ -189,6 +189,7 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 		d.status = StatusInitialized
 		d.connect()
 		tick := time.NewTicker(d.reconnectDelay)
+		defer tick.Stop()
 		for {
 			select {
 			// watchdog for the device
