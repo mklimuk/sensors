@@ -52,6 +52,8 @@ const (
 
 var ErrCommandUnsupported = errors.New("unsupported command")
 var ErrCommandFailed = errors.New("command failed")
+var ErrNotConnected = errors.New("not connected")
+var ErrNoReconnectChannel = errors.New("reconnect channel not initialized")
 var ErrI2CStatusTimeout = errors.New("i2c status check timeout")
 var ErrI2CAddressMismatch = errors.New("i2c address mismatch")
 
@@ -69,7 +71,7 @@ var (
 )
 
 type MCP2221 struct {
-	mx             sync.Mutex
+	mx             sync.RWMutex
 	request        []byte
 	response       []byte
 	responseWait   time.Duration
@@ -228,10 +230,9 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 	return nil
 }
 
-func (d *MCP2221) reconnect() {
+func (d *MCP2221) Reconnect() error {
 	if d.reconnectChan == nil {
-		slog.Warn("reconnect channel not initialized")
-		return
+		return ErrNoReconnectChannel
 	}
 	select {
 	case d.reconnectChan <- struct{}{}:
@@ -239,6 +240,7 @@ func (d *MCP2221) reconnect() {
 	default:
 		slog.Info("reconnect in progress")
 	}
+	return nil
 }
 
 func (d *MCP2221) SetVendorAndProductID(vendor, product uint16) {
@@ -249,6 +251,9 @@ func (d *MCP2221) SetVendorAndProductID(vendor, product uint16) {
 func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0x90
 	binary.LittleEndian.PutUint16(d.request[1:3], uint16(len(buffer)))
@@ -275,9 +280,18 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	return nil
 }
 
+func (d *MCP2221) IsConnected() bool {
+	d.mx.RLock()
+	defer d.mx.RUnlock()
+	return d.status == StatusConnected
+}
+
 func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	// send i2c read request
 	d.request[0] = 0x91
@@ -325,6 +339,9 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	err := d.send(ctx)
@@ -346,6 +363,9 @@ func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
 func (d *MCP2221) ReadGPIOSettings(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
@@ -381,6 +401,9 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 	}
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0xB1 // command
 	d.request[1] = 0x00 // subcommand
@@ -418,6 +441,9 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParameters) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0xB1
 	d.request[1] = 0x01
@@ -451,6 +477,9 @@ func (d *MCP2221) Read(ctx context.Context) ([]byte, error) {
 func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return MCP2221GPIOValues{}, ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0x51
 	err := d.send(ctx)
@@ -492,6 +521,9 @@ func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return MCP2221GPIOParameters{}, ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
@@ -522,6 +554,9 @@ func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters,
 func (d *MCP2221) Status(ctx context.Context) (*MCP2221Status, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return nil, ErrNotConnected
+	}
 	return d.doGetStatus(ctx)
 }
 
@@ -542,6 +577,9 @@ func (d *MCP2221) doGetStatus(ctx context.Context) (*MCP2221Status, error) {
 func (d *MCP2221) Reset(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	d.resetBuffers()
 	d.request[0] = 0x70
 	d.request[1] = 0xAB
@@ -582,6 +620,9 @@ func bufferToStatus(buffer []byte) *MCP2221Status {
 func (d *MCP2221) Release(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return ErrNotConnected
+	}
 	_, err := d.releaseBus(ctx)
 	return err
 }
@@ -589,6 +630,9 @@ func (d *MCP2221) Release(ctx context.Context) error {
 func (d *MCP2221) ReleaseBus(ctx context.Context) (*MCP2221Status, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
+	if d.status != StatusConnected {
+		return nil, ErrNotConnected
+	}
 	return d.releaseBus(ctx)
 }
 
