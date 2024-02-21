@@ -165,7 +165,6 @@ func (d *MCP2221) connect() error {
 	if err != nil {
 		return fmt.Errorf("could not open hid device vendor: %#x product: %#x; %w", d.vendorID, d.productID, err)
 	}
-	slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
 	return nil
 }
 
