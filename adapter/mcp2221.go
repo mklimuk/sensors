@@ -71,16 +71,13 @@ var (
 )
 
 type MCP2221 struct {
-	mx             sync.Mutex
-	request        []byte
-	response       []byte
-	responseWait   time.Duration
-	vendorID       uint16
-	productID      uint16
-	device         *hid.Device
-	reconnectDelay time.Duration
-	reconnectChan  chan struct{}
-	status         int
+	mx           sync.Mutex
+	request      []byte
+	response     []byte
+	responseWait time.Duration
+	vendorID     uint16
+	productID    uint16
+	device       *hid.Device
 }
 
 type MCP2221Status struct {
@@ -140,12 +137,11 @@ type MCP2221GPIOParameters struct {
 
 func NewMCP2221() *MCP2221 {
 	return &MCP2221{
-		request:        make([]byte, 64),
-		response:       make([]byte, 64),
-		responseWait:   50 * time.Millisecond,
-		vendorID:       VendorID,
-		productID:      ProductID,
-		reconnectDelay: 5 * time.Second,
+		request:      make([]byte, 64),
+		response:     make([]byte, 64),
+		responseWait: 50 * time.Millisecond,
+		vendorID:     VendorID,
+		productID:    ProductID,
 	}
 }
 
@@ -160,86 +156,29 @@ func (d *MCP2221) Init() error {
 		slog.Info("found hid device", "vendor", device.VendorID, "product", device.ProductID)
 		return nil
 	})
-	d.status = StatusConnecting
-	slog.Info("connecting to hid device", "vendor", d.vendorID, "product", d.productID)
-	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
-	if err != nil {
-		d.status = StatusInitialized
-		return fmt.Errorf("could not open hid device: %w", err)
-	}
-	d.status = StatusConnected
 	return nil
 }
 
-func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
-	err := hid.Init()
-	if err != nil {
-		return fmt.Errorf("could not init HID: %w", err)
-	}
-	_ = hid.Enumerate(hid.ProductIDAny, hid.VendorIDAny, func(device *hid.DeviceInfo) error {
-		slog.Info("found hid device", "vendor", device.VendorID, "product", device.ProductID)
-		return nil
-	})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// initialize the channel
-		d.reconnectChan = make(chan struct{})
-		defer close(d.reconnectChan)
-		d.status = StatusInitialized
-		d.connect()
-		tick := time.NewTicker(d.reconnectDelay)
-		defer tick.Stop()
-		slog.Info("starting hid watchdog", "vendor", d.vendorID, "product", d.productID)
-		for {
-			select {
-			// watchdog for the device
-			case <-tick.C:
-				if d.IsConnected() {
-					continue
-				}
-				slog.Info("device is disconnected; reconnecting", "vendor", d.vendorID, "product", d.productID)
-				d.connect()
-			case <-d.reconnectChan:
-				slog.Info("reconnect signal received", "vendor", d.vendorID, "product", d.productID)
-				d.connect()
-			case <-ctx.Done():
-				slog.Info("closing device and exiting hid reconnect loop")
-				err := d.device.Close()
-				if err != nil {
-					slog.Info("error closing hid device", "err", err)
-				}
-				return
-			}
-		}
-	}()
-	return nil
-}
-
-func (d *MCP2221) connect() {
+func (d *MCP2221) connect() error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	d.status = StatusConnecting
 	var err error
 	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
-	if err == nil {
-		d.status = StatusConnected
-		slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
-		return
+	if err != nil {
+		return fmt.Errorf("could not open hid device vendor: %#x product: %#x; %w", d.vendorID, d.productID, err)
 	}
-	d.status = StatusInitialized
-	slog.Error("could not open hid device", "vendor", d.vendorID, "product", d.productID, "err", err)
+	slog.Info("hid device connected", "vendor", d.vendorID, "product", d.productID)
+	return nil
 }
 
-func (d *MCP2221) Reconnect() error {
-	if d.reconnectChan == nil {
-		return ErrNoReconnectChannel
-	}
-	select {
-	case d.reconnectChan <- struct{}{}:
-		slog.Info("reconnect signal sent")
-	default:
-		slog.Info("reconnect in progress")
+func (d *MCP2221) disconnect() error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	if d.device != nil {
+		err := d.device.Close()
+		if err != nil {
+			return fmt.Errorf("could not close hid device: %w", err)
+		}
 	}
 	return nil
 }
@@ -252,9 +191,6 @@ func (d *MCP2221) SetVendorAndProductID(vendor, product uint16) {
 func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0x90
 	binary.LittleEndian.PutUint16(d.request[1:3], uint16(len(buffer)))
@@ -263,7 +199,17 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	if len(buffer) > 0 {
 		copy(d.request[4:], buffer)
 	}
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("i2c write to %x request write failed: %w", address, err)
 	}
@@ -281,25 +227,26 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	return nil
 }
 
-func (d *MCP2221) IsConnected() bool {
-	d.mx.Lock()
-	defer d.mx.Unlock()
-	return d.status == StatusConnected
-}
-
 func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	// send i2c read request
 	d.request[0] = 0x91
 	binary.LittleEndian.PutUint16(d.request[1:3], uint16(len(buffer)))
 	addr := address<<1 + 1
 	d.request[3] = addr
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	// we iterated several times with no result
 	if err != nil {
 		return fmt.Errorf("i2c read from %x request failed: %w", address, err)
@@ -340,12 +287,19 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("read chip parameters command request write failed: %w", err)
 	}
@@ -364,13 +318,20 @@ func (d *MCP2221) ReadChipSettings(ctx context.Context) error {
 func (d *MCP2221) ReadGPIOSettings(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("read gpio parameters command request write failed: %w", err)
 	}
@@ -402,9 +363,6 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 	}
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0xB1 // command
 	d.request[1] = 0x00 // subcommand
@@ -424,7 +382,17 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 		dump("sent chip settings:", d.request[:12])
 		return nil
 	}
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("write chip parameters command request write failed: %w", err)
 	}
@@ -442,9 +410,6 @@ func (d *MCP2221) UpdateVendorAndProductID(ctx context.Context, vendor, product 
 func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParameters) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0xB1
 	d.request[1] = 0x01
@@ -452,7 +417,17 @@ func (d *MCP2221) SetGPIOParameters(ctx context.Context, params MCP2221GPIOParam
 	d.request[3] = byte(params.GPIO1Designation) | byte(params.GPIO1Mode)
 	d.request[4] = byte(params.GPIO2Designation) | byte(params.GPIO2Mode)
 	d.request[5] = byte(params.GPIO3Designation) | byte(params.GPIO3Mode)
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("set GP parameters command request write failed: %w", err)
 	}
@@ -478,12 +453,19 @@ func (d *MCP2221) Read(ctx context.Context) ([]byte, error) {
 func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return MCP2221GPIOValues{}, ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0x51
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return MCP2221GPIOValues{}, fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	var res MCP2221GPIOValues
 	if err != nil {
 		return res, fmt.Errorf("read GPIO values command request write failed: %w", err)
@@ -522,13 +504,20 @@ func (d *MCP2221) ReadGPIO(ctx context.Context) (MCP2221GPIOValues, error) {
 func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return MCP2221GPIOParameters{}, ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0xB0
 	d.request[1] = 0x01
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return MCP2221GPIOParameters{}, fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return MCP2221GPIOParameters{}, fmt.Errorf("get GP parameters command request write failed: %w", err)
 	}
@@ -555,16 +544,23 @@ func (d *MCP2221) GetGPIOParameters(ctx context.Context) (MCP2221GPIOParameters,
 func (d *MCP2221) Status(ctx context.Context) (*MCP2221Status, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return nil, ErrNotConnected
-	}
 	return d.doGetStatus(ctx)
 }
 
 func (d *MCP2221) doGetStatus(ctx context.Context) (*MCP2221Status, error) {
 	d.resetBuffers()
 	d.request[0] = 0x10
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return nil, fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("could not send status request: %w", err)
 	}
@@ -578,15 +574,22 @@ func (d *MCP2221) doGetStatus(ctx context.Context) (*MCP2221Status, error) {
 func (d *MCP2221) Reset(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	d.resetBuffers()
 	d.request[0] = 0x70
 	d.request[1] = 0xAB
 	d.request[2] = 0xCD
 	d.request[3] = 0xEF
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return fmt.Errorf("reset request failed: %w", err)
 	}
@@ -621,9 +624,6 @@ func bufferToStatus(buffer []byte) *MCP2221Status {
 func (d *MCP2221) Release(ctx context.Context) error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return ErrNotConnected
-	}
 	_, err := d.releaseBus(ctx)
 	return err
 }
@@ -631,9 +631,6 @@ func (d *MCP2221) Release(ctx context.Context) error {
 func (d *MCP2221) ReleaseBus(ctx context.Context) (*MCP2221Status, error) {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	if d.status != StatusConnected {
-		return nil, ErrNotConnected
-	}
 	return d.releaseBus(ctx)
 }
 
@@ -641,7 +638,17 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 	d.resetBuffers()
 	d.request[0] = 0x10
 	d.request[2] = 0x10
-	err := d.send(ctx)
+	err := d.connect()
+	if err != nil {
+		return nil, fmt.Errorf("could not connect to mcp2221: %w", err)
+	}
+	defer func() {
+		err = d.disconnect()
+		if err != nil {
+			slog.Error("could not disconnect from mcp2221", "err", err)
+		}
+	}()
+	err = d.send(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("release request failed: %w", err)
 	}
