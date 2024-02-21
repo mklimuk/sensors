@@ -160,8 +160,6 @@ func (d *MCP2221) Init() error {
 }
 
 func (d *MCP2221) connect() error {
-	d.mx.Lock()
-	defer d.mx.Unlock()
 	var err error
 	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
 	if err != nil {
@@ -172,8 +170,6 @@ func (d *MCP2221) connect() error {
 }
 
 func (d *MCP2221) disconnect() error {
-	d.mx.Lock()
-	defer d.mx.Unlock()
 	if d.device != nil {
 		err := d.device.Close()
 		if err != nil {
