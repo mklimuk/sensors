@@ -190,15 +190,16 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 		d.connect()
 		tick := time.NewTicker(d.reconnectDelay)
 		defer tick.Stop()
+		slog.Info("starting hid watchdog", "vendor", d.vendorID, "product", d.productID)
 		for {
 			select {
 			// watchdog for the device
 			case <-tick.C:
-				d.mx.RLock()
+				d.mx.Lock()
 				if d.status == StatusConnected {
 					continue
 				}
-				d.mx.RUnlock()
+				d.mx.Unlock()
 				slog.Info("device is disconnected; reconnecting", "vendor", d.vendorID, "product", d.productID)
 				d.connect()
 			case <-d.reconnectChan:
