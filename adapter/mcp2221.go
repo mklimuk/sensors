@@ -71,7 +71,7 @@ var (
 )
 
 type MCP2221 struct {
-	mx             sync.RWMutex
+	mx             sync.Mutex
 	request        []byte
 	response       []byte
 	responseWait   time.Duration
@@ -195,11 +195,9 @@ func (d *MCP2221) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 			select {
 			// watchdog for the device
 			case <-tick.C:
-				d.mx.Lock()
-				if d.status == StatusConnected {
+				if d.IsConnected() {
 					continue
 				}
-				d.mx.Unlock()
 				slog.Info("device is disconnected; reconnecting", "vendor", d.vendorID, "product", d.productID)
 				d.connect()
 			case <-d.reconnectChan:
@@ -284,8 +282,8 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 }
 
 func (d *MCP2221) IsConnected() bool {
-	d.mx.RLock()
-	defer d.mx.RUnlock()
+	d.mx.Lock()
+	defer d.mx.Unlock()
 	return d.status == StatusConnected
 }
 
