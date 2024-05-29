@@ -214,7 +214,7 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
-		_, err = d.releaseBus(ctx)
+		_, err = d.doReleaseBus(ctx)
 		if err != nil {
 			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
 		}
@@ -251,7 +251,7 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 		return fmt.Errorf("i2c read from %x response receive failed: %w", address, err)
 	}
 	if d.response[1] == 0x01 {
-		_, err = d.releaseBus(ctx)
+		_, err = d.doReleaseBus(ctx)
 		if err != nil {
 			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
 		}
@@ -630,9 +630,6 @@ func (d *MCP2221) ReleaseBus(ctx context.Context) (*MCP2221Status, error) {
 }
 
 func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
-	d.resetBuffers()
-	d.request[0] = 0x10
-	d.request[2] = 0x10
 	err := d.connect()
 	if err != nil {
 		return nil, fmt.Errorf("could not connect to mcp2221: %w", err)
@@ -643,7 +640,14 @@ func (d *MCP2221) releaseBus(ctx context.Context) (*MCP2221Status, error) {
 			slog.Error("could not disconnect from mcp2221", "err", err)
 		}
 	}()
-	err = d.send(ctx)
+	return d.doReleaseBus(ctx)
+}
+
+func (d *MCP2221) doReleaseBus(ctx context.Context) (*MCP2221Status, error) {
+	d.resetBuffers()
+	d.request[0] = 0x10
+	d.request[2] = 0x10
+	err := d.send(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("release request failed: %w", err)
 	}
