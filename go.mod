@@ -10,5 +10,5 @@ require (
 	github.com/sstallion/go-hid v0.14.1
 	github.com/stretchr/testify v1.4.0
 	github.com/urfave/cli/v2 v2.27.1
-	gopkg.in/yaml.v2 v2.2.2
+	gopkg.in/yaml.v3 v3.0.1
 )
