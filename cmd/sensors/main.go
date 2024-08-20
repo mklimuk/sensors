@@ -29,6 +29,7 @@ func run() int {
 		&mcp2221Cmd,
 		&gpioCmd,
 		&motionCmd,
+		&lightCmd,
 	}
 	err := app.Run(os.Args)
 	if err != nil {
