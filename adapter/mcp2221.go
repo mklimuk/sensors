@@ -715,7 +715,6 @@ func (d *MCP2221) receive(ctx context.Context) error {
 	if verbose {
 		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
 	}
-	slog.Debug("reading response from adapter")
 	n, err := d.device.Read(d.response)
 	if err != nil {
 		return fmt.Errorf("could not read response: %w", err)
