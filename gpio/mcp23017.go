@@ -11,6 +11,8 @@ import (
 
 type registry int
 
+const DefaultMCP23017Address = 0x21
+
 // BRegistries
 const (
 	IODIRA registry = iota
@@ -140,7 +142,7 @@ func (m *MCP23017) InitB(ctx context.Context, inout byte) error {
 	return fmt.Errorf("could not initialize gpio B set (retry limit reached): %w", err)
 }
 
-func (m MCP23017) readRegistry(ctx context.Context, addr byte) (byte, error) {
+func (m *MCP23017) readRegistry(ctx context.Context, addr byte) (byte, error) {
 	m.mx.Lock()
 	defer m.mx.Unlock()
 	err := m.transport.WriteToAddr(ctx, m.address, []byte{addr})
