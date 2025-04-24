@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/mklimuk/sensors"
 	"time"
+
+	"github.com/mklimuk/sensors"
 )
 
 const BH1750AddrHigh = 0b1011100

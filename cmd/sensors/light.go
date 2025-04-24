@@ -2,10 +2,16 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"os"
+	"time"
+
+	chlog "github.com/charmbracelet/log"
+	"github.com/urfave/cli/v2"
+
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
-	"github.com/urfave/cli/v2"
 )
 
 var lightCmd = cli.Command{
@@ -34,7 +40,18 @@ var lightReadCmd = cli.Command{
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		verbose := c.Bool("verbose")
+		ctx := console.SetVerbose(context.Background(), verbose)
+		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
+			ReportCaller:    true,
+			ReportTimestamp: true,
+			TimeFormat:      time.DateTime,
+		})
+		if verbose {
+			charm.SetLevel(chlog.DebugLevel)
+		}
+		slog.SetDefault(slog.New(charm))
+
 		switch c.String("sensor") {
 		case "bh1750":
 			switch c.String("adapter") {

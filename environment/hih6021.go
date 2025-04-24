@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/mklimuk/sensors"
 	"time"
+
+	"github.com/mklimuk/sensors"
 )
 
 const defaultAddress = 0x27
@@ -13,6 +14,7 @@ const defaultAddress = 0x27
 var divider = float32(1<<14 - 2)
 
 var ErrStaleData = fmt.Errorf("stale data")
+var ErrCommandMode = fmt.Errorf("device in command mode")
 
 // HIH6021 represents Honywell HumidIcon™ Digital Humidity/Temperature sensor
 type HIH6021 struct {
@@ -54,7 +56,7 @@ func (sensor *HIH6021) measure(ctx context.Context) error {
 	}
 	// check the oldest bit
 	if resp[0]&0x80 > 0 {
-		return fmt.Errorf("device in command mode")
+		return ErrCommandMode
 	}
 	// check the second oldest bit
 	if resp[0]&0x40 > 0 {

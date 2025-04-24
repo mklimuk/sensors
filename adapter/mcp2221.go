@@ -214,6 +214,7 @@ func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) 
 	}
 	// read could not be performed
 	if d.response[1] == 0x01 {
+		slog.Debug("i2c bus busy, releasing bus", "state", d.response[2])
 		_, err = d.doReleaseBus(ctx)
 		if err != nil {
 			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
@@ -251,6 +252,7 @@ func (d *MCP2221) ReadFromAddr(ctx context.Context, address byte, buffer []byte)
 		return fmt.Errorf("i2c read from %x response receive failed: %w", address, err)
 	}
 	if d.response[1] == 0x01 {
+		slog.Debug("i2c bus busy, releasing bus", "state", d.response[2])
 		_, err = d.doReleaseBus(ctx)
 		if err != nil {
 			return fmt.Errorf("%w; could not release bus: %v", sensors.ErrBusBusy, err)
@@ -652,6 +654,9 @@ func (d *MCP2221) doReleaseBus(ctx context.Context) (*MCP2221Status, error) {
 		return nil, fmt.Errorf("release request failed: %w", err)
 	}
 	err = d.waitAndReceive(ctx, chipDelay)
+	if err != nil {
+		return nil, fmt.Errorf("release response read failed: %w", err)
+	}
 	return bufferToStatus(d.response), nil
 }
 
@@ -711,10 +716,6 @@ func (d *MCP2221) send(ctx context.Context) error {
 
 // receive reads the response from the device
 func (d *MCP2221) receive(ctx context.Context) error {
-	verbose := console.IsVerbose(ctx)
-	if verbose {
-		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
-	}
 	n, err := d.device.Read(d.response)
 	if err != nil {
 		return fmt.Errorf("could not read response: %w", err)
@@ -722,6 +723,7 @@ func (d *MCP2221) receive(ctx context.Context) error {
 	if n != 64 {
 		return fmt.Errorf("short read: %d", n)
 	}
+	verbose := console.IsVerbose(ctx)
 	if verbose {
 		console.Printf("read message from adapter:\n%s\n", hex.Dump(d.response))
 	}
