@@ -1,7 +1,7 @@
-version: '2'
 services:
   sensors_linux_x64:
-    image: "mklimuk/gobuild:1.23-cross-buster"
+    image: "docker.satsoft.pl/build/golang-cross-buster:1.24"
+    platform: linux/amd64
     volumes:
       - .:/src/sensors
       - $GOPATH/pkg/mod/cache/download:/go/pkg/mod/cache/download

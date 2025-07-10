@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/mklimuk/sensors"
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
@@ -25,22 +26,33 @@ var tempReadCmd = cli.Command{
 	},
 	Action: func(c *cli.Context) error {
 		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
-		switch c.String("sensor") {
-		case "hih6021":
-			switch c.String("adapter") {
-			case "mcp2221":
-				a := adapter.NewMCP2221()
-				err := a.Init()
-				if err != nil {
-					return console.Exit(1, "adapter initialization error: %s", console.Red(err))
-				}
-				s := environment.NewHIH6021(a)
-				temp, hum, err := s.GetTempAndHum(ctx)
-				if err != nil {
-					console.Errorf("error getting temperature read: %s", console.Red(err))
-				}
-				console.Printf("%s  %s\n%s %s\n", console.PictoThermometer, console.White(temp), console.PictoHumidity, console.White(hum))
+
+		var a sensors.I2CBus
+		switch c.String("adapter") {
+		case "mcp2221":
+			mcp2221 := adapter.NewMCP2221()
+			err := mcp2221.Init()
+			if err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
+			a = mcp2221
+		}
+		switch c.String("sensor") {
+		case "tc74":
+			s := environment.NewTC74(a)
+			temp, err := s.GetTemperature(ctx)
+			if err != nil {
+				return console.Exit(1, "error getting temperature read: %s", console.Red(err))
+			}
+			console.Printf("%s %s\n", console.PictoThermometer, console.White(temp))
+		case "hih6021":
+			s := environment.NewHIH6021(a)
+			temp, hum, err := s.GetTempAndHum(ctx)
+			if err != nil {
+				console.Errorf("error getting temperature read: %s", console.Red(err))
+			}
+			console.Printf("%s  %s\n%s %s\n", console.PictoThermometer, console.White(temp), console.PictoHumidity, console.White(hum))
+
 		}
 		return nil
 	},

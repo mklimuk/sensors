@@ -82,7 +82,7 @@ compile: dirs
 # this is missing C cross compiler setup
 .PHONY: compile-linux
 compile-linux: dirs
-	GOOS=linux GOARCH=amd64 GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
 
 
 
