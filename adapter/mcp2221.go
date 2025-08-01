@@ -12,10 +12,158 @@ import (
 
 	"github.com/mklimuk/sensors"
 
-	"github.com/sstallion/go-hid"
+	"github.com/karalabe/hid"
 
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 )
+
+/*
+https://www.microchip.com/en-us/product/MCP2221
+
+Bus 002 Device 003: ID 04d8:00dd Microchip Technology, Inc. MCP2221(a) UART/I2C Bridge
+Device Descriptor:
+  bLength                18
+  bDescriptorType         1
+  bcdUSB               2.00
+  bDeviceClass          239 Miscellaneous Device
+  bDeviceSubClass         2
+  bDeviceProtocol         1 Interface Association
+  bMaxPacketSize0         8
+  idVendor           0x04d8 Microchip Technology, Inc.
+  idProduct          0x00dd MCP2221(a) UART/I2C Bridge
+  bcdDevice            1.00
+  iManufacturer           1 Microchip Technology Inc.
+  iProduct                2 MCP2221 USB-I2C/UART Combo
+  iSerial                 0
+  bNumConfigurations      1
+  Configuration Descriptor:
+    bLength                 9
+    bDescriptorType         2
+    wTotalLength       0x006b
+    bNumInterfaces          3
+    bConfigurationValue     1
+    iConfiguration          0
+    bmAttributes         0x80
+      (Bus Powered)
+    MaxPower              100mA
+    Interface Association:
+      bLength                 8
+      bDescriptorType        11
+      bFirstInterface         0
+      bInterfaceCount         2
+      bFunctionClass          2 Communications
+      bFunctionSubClass       2 Abstract (modem)
+      bFunctionProtocol       1 AT-commands (v.25ter)
+      iFunction               0
+    Interface Descriptor:
+      bLength                 9
+      bDescriptorType         4
+      bInterfaceNumber        0
+      bAlternateSetting       0
+      bNumEndpoints           1
+      bInterfaceClass         2 Communications
+      bInterfaceSubClass      2 Abstract (modem)
+      bInterfaceProtocol      1 AT-commands (v.25ter)
+      iInterface              0
+      CDC Header:
+        bcdCDC               1.10
+      CDC ACM:
+        bmCapabilities       0x02
+          line coding and serial state
+      CDC Union:
+        bMasterInterface        0
+        bSlaveInterface         1
+      CDC Call Management:
+        bmCapabilities       0x00
+        bDataInterface          1
+      Endpoint Descriptor:
+        bLength                 7
+        bDescriptorType         5
+        bEndpointAddress     0x81  EP 1 IN
+        bmAttributes            3
+          Transfer Type            Interrupt
+          Synch Type               None
+          Usage Type               Data
+        wMaxPacketSize     0x0008  1x 8 bytes
+        bInterval               2
+    Interface Descriptor:
+      bLength                 9
+      bDescriptorType         4
+      bInterfaceNumber        1
+      bAlternateSetting       0
+      bNumEndpoints           2
+      bInterfaceClass        10 CDC Data
+      bInterfaceSubClass      0
+      bInterfaceProtocol      0
+      iInterface              0
+      Endpoint Descriptor:
+        bLength                 7
+        bDescriptorType         5
+        bEndpointAddress     0x02  EP 2 OUT
+        bmAttributes            2
+          Transfer Type            Bulk
+          Synch Type               None
+          Usage Type               Data
+        wMaxPacketSize     0x0010  1x 16 bytes
+        bInterval               0
+      Endpoint Descriptor:
+        bLength                 7
+        bDescriptorType         5
+        bEndpointAddress     0x82  EP 2 IN
+        bmAttributes            2
+          Transfer Type            Bulk
+          Synch Type               None
+          Usage Type               Data
+        wMaxPacketSize     0x0010  1x 16 bytes
+        bInterval               0
+    Interface Descriptor:
+      bLength                 9
+      bDescriptorType         4
+      bInterfaceNumber        2
+      bAlternateSetting       0
+      bNumEndpoints           2
+      bInterfaceClass         3 Human Interface Device
+      bInterfaceSubClass      0
+      bInterfaceProtocol      0
+      iInterface              0
+        HID Device Descriptor:
+          bLength                 9
+          bDescriptorType        33
+          bcdHID               1.11
+          bCountryCode            0 Not supported
+          bNumDescriptors         1
+          bDescriptorType        34 Report
+          wDescriptorLength      28
+         Report Descriptors:
+           ** UNAVAILABLE **
+      Endpoint Descriptor:
+        bLength                 7
+        bDescriptorType         5
+        bEndpointAddress     0x83  EP 3 IN
+        bmAttributes            3
+          Transfer Type            Interrupt
+          Synch Type               None
+          Usage Type               Data
+        wMaxPacketSize     0x0040  1x 64 bytes
+        bInterval               1
+      Endpoint Descriptor:
+        bLength                 7
+        bDescriptorType         5
+        bEndpointAddress     0x03  EP 3 OUT
+        bmAttributes            3
+          Transfer Type            Interrupt
+          Synch Type               None
+          Usage Type               Data
+        wMaxPacketSize     0x0040  1x 64 bytes
+        bInterval               1
+Device Status:     0x0000
+  (Bus Powered)
+
+MCP2221 uses a dedicated kernel driver:
+
+hid_mcp2221            20480  0
+hid                   159744  3 usbhid,hid_generic,hid_mcp2221
+*/
 
 const VendorID = 0x04D8
 const ProductID = 0x00DD
@@ -148,23 +296,23 @@ func NewMCP2221() *MCP2221 {
 func (d *MCP2221) Init() error {
 	d.mx.Lock()
 	defer d.mx.Unlock()
-	err := hid.Init()
-	if err != nil {
-		return fmt.Errorf("could not init hid: %w", err)
-	}
-	_ = hid.Enumerate(hid.ProductIDAny, hid.VendorIDAny, func(device *hid.DeviceInfo) error {
-		slog.Info("found hid device", "vendor", device.VendorID, "product", device.ProductID)
-		return nil
-	})
+	// karalabe/hid doesn't need explicit initialization
 	return nil
 }
 
 func (d *MCP2221) connect() error {
-	var err error
-	d.device, err = hid.OpenFirst(d.vendorID, d.productID)
-	if err != nil {
-		return fmt.Errorf("could not open hid device vendor: %#x product: %#x; %w", d.vendorID, d.productID, err)
+	// Enumerate devices to find the MCP2221
+	devices := hid.Enumerate(d.vendorID, d.productID)
+	if len(devices) == 0 {
+		return fmt.Errorf("could not find hid device vendor: %#x product: %#x", d.vendorID, d.productID)
 	}
+
+	// Open the first device found
+	device, err := devices[0].Open()
+	if err != nil {
+		return fmt.Errorf("could not open hid device vendor: %#x product: %#x: %w", d.vendorID, d.productID, err)
+	}
+	d.device = device
 	return nil
 }
 
@@ -174,6 +322,7 @@ func (d *MCP2221) disconnect() error {
 		if err != nil {
 			return fmt.Errorf("could not close hid device: %w", err)
 		}
+		d.device = nil
 	}
 	return nil
 }
@@ -704,6 +853,7 @@ func (d *MCP2221) send(ctx context.Context) error {
 	if verbose {
 		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
 	}
+
 	n, err := d.device.Write(d.request)
 	if err != nil {
 		return fmt.Errorf("could not write request: %w", err)
