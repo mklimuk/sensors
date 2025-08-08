@@ -24,20 +24,22 @@ var gpioCmd = cli.Command{
 
 var gpioReadCmd = cli.Command{
 	Name: "read",
+	Flags: []cli.Flag{
+		&cli.IntFlag{
+			Name:    "address",
+			Aliases: []string{"addr"},
+			Usage:   "address of the MCP23017",
+			Value:   gpio.DefaultMCP23017Address,
+		},
+	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() != 1 {
-			return console.Exit(1, "expected 1 argument, got %d", c.NArg())
-		}
-		bytes, err := hex.DecodeString(c.Args().Get(0))
-		if err != nil {
-			return console.Exit(1, "could not decode address: %v", err)
-		}
+		addr := c.Int("address")
 		mcp2221 := adapter.NewMCP2221()
-		err = mcp2221.Init()
+		err := mcp2221.Init()
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		exp := gpio.NewMCP23017(mcp2221, bytes[0])
+		exp := gpio.NewMCP23017(mcp2221, byte(addr))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.InitA(ctx, 0xFF)
@@ -60,20 +62,22 @@ var gpioReadCmd = cli.Command{
 
 var gpioStatusCmd = cli.Command{
 	Name: "status",
+	Flags: []cli.Flag{
+		&cli.IntFlag{
+			Name:    "address",
+			Aliases: []string{"addr"},
+			Usage:   "address of the MCP23017",
+			Value:   gpio.DefaultMCP23017Address,
+		},
+	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() != 1 {
-			return console.Exit(1, "expected 1 argument, got %d", c.NArg())
-		}
-		bytes, err := hex.DecodeString(c.Args().Get(0))
-		if err != nil {
-			return console.Exit(1, "could not decode address: %v", err)
-		}
+		addr := c.Int("address")
 		a := adapter.NewMCP2221()
-		err = a.Init()
+		err := a.Init()
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		exp := gpio.NewMCP23017(a, bytes[0])
+		exp := gpio.NewMCP23017(a, byte(addr))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		data, err := exp.ReadSettingsA(ctx)
@@ -87,15 +91,20 @@ var gpioStatusCmd = cli.Command{
 
 var gpioConfigureCmd = cli.Command{
 	Name: "configure",
+	Flags: []cli.Flag{
+		&cli.IntFlag{
+			Name:    "address",
+			Aliases: []string{"addr"},
+			Usage:   "address of the MCP23017",
+			Value:   gpio.DefaultMCP23017Address,
+		},
+	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() != 2 {
-			return console.Exit(1, "expected 2 arguments, got %d", c.NArg())
+		addr := c.Int("address")
+		if c.NArg() != 1 {
+			return console.Exit(1, "expected 1 argument, got %d", c.NArg())
 		}
-		addr, err := hex.DecodeString(c.Args().Get(0))
-		if err != nil {
-			return console.Exit(1, "could not decode address: %v", err)
-		}
-		data, err := hex.DecodeString(c.Args().Get(1))
+		data, err := hex.DecodeString(c.Args().Get(0))
 		if err != nil {
 			return console.Exit(1, "could not decode data: %v", err)
 		}
@@ -104,7 +113,7 @@ var gpioConfigureCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		exp := gpio.NewMCP23017(a, addr[0])
+		exp := gpio.NewMCP23017(a, byte(addr))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.WriteSettingsA(ctx, data[0])
@@ -118,15 +127,20 @@ var gpioConfigureCmd = cli.Command{
 
 var gpioPullCmd = cli.Command{
 	Name: "pull",
+	Flags: []cli.Flag{
+		&cli.IntFlag{
+			Name:    "address",
+			Aliases: []string{"addr"},
+			Usage:   "address of the MCP23017",
+			Value:   gpio.DefaultMCP23017Address,
+		},
+	},
 	Action: func(c *cli.Context) error {
-		if c.NArg() != 2 {
-			return console.Exit(1, "expected 2 arguments, got %d", c.NArg())
+		addr := c.Int("address")
+		if c.NArg() != 1 {
+			return console.Exit(1, "expected 1 argument, got %d", c.NArg())
 		}
-		addr, err := hex.DecodeString(c.Args().Get(0))
-		if err != nil {
-			return console.Exit(1, "could not decode address: %v", err)
-		}
-		data, err := hex.DecodeString(c.Args().Get(1))
+		data, err := hex.DecodeString(c.Args().Get(0))
 		if err != nil {
 			return console.Exit(1, "could not decode data: %v", err)
 		}
@@ -135,7 +149,7 @@ var gpioPullCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		exp := gpio.NewMCP23017(a, addr[0])
+		exp := gpio.NewMCP23017(a, byte(addr))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = exp.PullUpA(ctx, data[0])
