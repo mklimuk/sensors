@@ -52,6 +52,13 @@ var tempReadCmd = cli.Command{
 				console.Errorf("error getting temperature read: %s", console.Red(err))
 			}
 			console.Printf("%s  %s\n%s %s\n", console.PictoThermometer, console.White(temp), console.PictoHumidity, console.White(hum))
+		case "shtc3":
+			s := environment.NewSHTC3(a)
+			temp, hum, err := s.GetTempAndHum(ctx)
+			if err != nil {
+				return console.Exit(1, "error getting temperature read: %s", console.Red(err))
+			}
+			console.Printf("%s  %s\n%s %s\n", console.PictoThermometer, console.White(temp), console.PictoHumidity, console.White(hum))
 
 		}
 		return nil
