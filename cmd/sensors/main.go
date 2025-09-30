@@ -30,6 +30,7 @@ func run() int {
 		&gpioCmd,
 		&motionCmd,
 		&lightCmd,
+		&airCmd,
 	}
 	err := app.Run(os.Args)
 	if err != nil {
