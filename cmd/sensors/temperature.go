@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/mklimuk/sensors"
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
+	"github.com/mklimuk/sensors/i2c"
 	"github.com/urfave/cli/v2"
 )
 
@@ -22,6 +24,14 @@ var tempReadCmd = cli.Command{
 			Name:  "sensor,s",
 			Value: "hih6021",
 		},
+		&cli.StringFlag{
+			Name:  "device,d",
+			Value: "/dev/i2c-1",
+		},
+		&cli.StringFlag{
+			Name:  "addr",
+			Value: "4d",
+		},
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
@@ -36,10 +46,34 @@ var tempReadCmd = cli.Command{
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
 			a = mcp2221
+		case "generic":
+			fallthrough
+		case "nanopi":
+			var err error
+			bus, err := i2c.NewGenericBus(c.String("device"))
+			if err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+			}
+			defer func() {
+				err := bus.Close()
+				if err != nil {
+					console.Errorf("error closing bus: %s", console.Red(err))
+				}
+			}()
+			a = bus
 		}
 		switch c.String("sensor") {
 		case "tc74":
-			s := environment.NewTC74(a)
+			addr := c.String("addr")
+			opts := []environment.TC74ConfigOption{}
+			if addr != "" {
+				addrInt, err := strconv.ParseInt(addr, 16, 8)
+				if err != nil {
+					return console.Exit(1, "invalid address: %s", console.Red(err))
+				}
+				opts = append(opts, environment.WithAddress(byte(addrInt)))
+			}
+			s := environment.NewTC74(a, opts...)
 			temp, err := s.GetTemperature(ctx)
 			if err != nil {
 				return console.Exit(1, "error getting temperature read: %s", console.Red(err))

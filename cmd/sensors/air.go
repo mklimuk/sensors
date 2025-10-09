@@ -12,6 +12,7 @@ import (
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/air"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
+	"github.com/mklimuk/sensors/i2c"
 )
 
 var airCmd = cli.Command{
@@ -28,6 +29,10 @@ var airReadCmd = cli.Command{
 		&cli.StringFlag{
 			Name:  "adapter,a",
 			Value: "mcp2221",
+		},
+		&cli.StringFlag{
+			Name:  "device,d",
+			Value: "/dev/i2c-1",
 		},
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
@@ -51,6 +56,25 @@ var airReadCmd = cli.Command{
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
 			s := air.NewAGS02MA(ad)
+			ppb, err := s.GetTVOC(ctx)
+			if err != nil {
+				return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
+			}
+			console.Printf("%d ppb\n", ppb)
+		case "generic":
+			fallthrough
+		case "nanopi":
+			bus, err := i2c.NewGenericBus(c.String("device"))
+			if err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+			}
+			defer func() {
+				err := bus.Close()
+				if err != nil {
+					console.Errorf("error closing bus: %s", console.Red(err))
+				}
+			}()
+			s := air.NewAGS02MA(bus)
 			ppb, err := s.GetTVOC(ctx)
 			if err != nil {
 				return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
