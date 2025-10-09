@@ -1,3 +1,8 @@
 dist
 cmd/sensors/sensors
 **/.DS_Store
+
+/.build
+/dev
+/dev-*
+/dist/

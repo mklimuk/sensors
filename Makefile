@@ -1,90 +1,124 @@
-SHELL=bash
+# Makefile for building the custom build tool
+# This replaces the mage-based build system
 
-DEFAULT_ENV_FILE := ~/.config/sensors/.env
-# If SENSOR_ENV variable is set we use it to define environment file path
-ENV_FILE := ${SENSOR_ENV}
+BINARY_NAME=dev
+SOURCE_DIR=cmd/dev
 
-# If env file is not set using HILO_ENV we try a default location
-ifeq ($(ENV_FILE),)
-	ifneq ("$(wildcard $(DEFAULT_ENV_FILE))","")
-		ENV_FILE := $(DEFAULT_ENV_FILE)
-	endif
-endif
+# Build for multiple platforms
+build-all: build build-linux build-darwin build-windows
 
-# If env file path is set we include it
-ifneq ($(ENV_FILE),)
-$(info including ENV file $(ENV_FILE))
-include $(ENV_FILE)
-endif
+# Build for current platform
+build:
+	@echo "Building $(BINARY_NAME) for current platform..."
+	go build -o $(BINARY_NAME) ./$(SOURCE_DIR)
 
-export GO111MODULE=on
+build-linux:
+	@echo "Building $(BINARY_NAME) for Linux..."
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 ./$(SOURCE_DIR)
 
-LAST_TAGGED=$(shell git rev-list --tags --max-count=1)
-VERSION=$(shell git describe --tags $(LAST_TAGGED))
-BUILDTIME=$(shell TZ=GMT date "+%Y-%m-%d_%H:%M_GMT")
-GITCOMMIT=$(shell git rev-parse --short HEAD 2>/dev/null)
-GITBRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
+build-darwin:
+	@echo "Building $(BINARY_NAME) for macOS..."
+	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 ./$(SOURCE_DIR)
+	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-darwin-arm64 ./$(SOURCE_DIR)
 
-COVERAGE_FILE:=coverage.out
-COVERAGE_HTML:=coverage.html
+build-windows:
+	@echo "Building $(BINARY_NAME) for Windows..."
+	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe ./$(SOURCE_DIR)
 
-SENSORS_BIN:=dist/sensors
-SENSORS_BIN_LOCAL:=dist/sns
-SENSORS_SRC:=./cmd/sensors
-
-DIST = dist
-
-.PHONY: all
-all: clean prereq test
-
-.PHONY: prereq
-prereq:
-	go get golang.org/x/lint/golint
-	go get golang.org/x/tools/cmd/goimports
-	go mod
-
-dirs: $(DIST)
-
-$(DIST):
-	mkdir -p $@
-
-.PHONY: clean
+# Clean build artifacts
 clean:
-	rm -rf dist
+	@echo "Cleaning $(BINARY_NAME) artifacts..."
+	rm $(BINARY_NAME)*
 
-.PHONY: test
-test:
-	INTEG=$(INTEG) go test --covermode=count -coverprofile=$(COVERAGE_FILE) ./... && tail -q -n +2 $(COVERAGE_FILE) | go tool cover -func=$(COVERAGE_FILE)
-	go tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
+# Install dependencies
+deps:
+	@echo "Installing dependencies..."
+	go mod tidy
+	go mod download
 
-.PHONY: race
-race:
-	go test -race -short ./...
+# Generate changelog
+changelog:
+	@echo "Generating changelog..."
+	./dev changelog
 
-.PHONY: msan
-msan:
-	go test -msan -short ./...
+# Generate changelog for next version
+changelog-next:
+	@echo "Generating changelog for next version..."
+	@read -p "Next version (e.g., v1.2.0): " version; \
+	./dev changelog --next $$version
 
-.PHONY: lint
-lint:
-	golint -set_exit_status ./...
+# Validate commit messages follow conventional commits
+validate-commits:
+	@echo "Validating commit messages..."
+	@git log --oneline origin/main..HEAD 2>/dev/null | while read line; do \
+		if ! echo "$$line" | grep -qE "^[a-f0-9]+ (feat|fix|docs|refactor|test|perf|build|ci|chore)(\(.+\))?:"; then \
+			echo "❌ Invalid commit: $$line"; \
+			echo "   Commits must follow format: <type>[scope]: <description>"; \
+			exit 1; \
+		fi; \
+	done || true
+	@echo "✅ All commits follow conventional format"
 
-.PHONY: fmt
-fmt:
-	goimports -l ./
+# Setup changelog tooling (git-chglog)
+setup-changelog:
+	@echo "Setting up changelog tooling..."
+	@./scripts/setup-changelog.sh
 
-LD_FLAGS:=-s -w -X github.com/mklimuk/sensors/cmd/sensors.version=$(VERSION) -X github.com/mklimuk/sensors/cmd/sensors.commit=$(GITCOMMIT) -X github.com/mklimuk/sensors/cmd/sensors.date=$(BUILDTIME)
+# Debian packaging targets
+deb-all:
+	@echo "Building Debian packages for all architectures and versions..."
+	@./scripts/build-deb-docker.sh 1.0.0 all all
 
-.PHONY: compile
-compile: dirs
-	GO111MODULE=on CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN_LOCAL) -v $(SENSORS_SRC)
+deb-amd64:
+	@echo "Building Debian package for amd64 (bookworm)..."
+	@./scripts/build-deb-docker.sh 1.0.0 amd64 bookworm
 
-# this is missing C cross compiler setup
-.PHONY: compile-linux
-compile-linux: dirs
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -ldflags '$(LD_FLAGS)' -o $(SENSORS_BIN) -v $(SENSORS_SRC)
+deb-arm64:
+	@echo "Building Debian package for arm64 (bookworm)..."
+	@./scripts/build-deb-docker.sh 1.0.0 arm64 bookworm
 
+deb-armhf:
+	@echo "Building Debian package for armhf (bookworm)..."
+	@./scripts/build-deb-docker.sh 1.0.0 armhf bookworm
 
+deb-custom:
+	@echo "Building custom Debian package..."
+	@read -p "Version (e.g., 1.0.0): " version; \
+	read -p "Architecture (amd64/arm64/armhf): " arch; \
+	read -p "Debian version (buster/bookworm/trixie): " debian_ver; \
+	./scripts/build-deb-docker.sh $$version $$arch $$debian_ver
 
+deb-clean:
+	@echo "Cleaning Debian build artifacts..."
+	@rm -rf build/deb dist/deb
+	@echo "✅ Debian build artifacts cleaned"
 
+# Show help
+help:
+	@echo "Available targets:"
+	@echo ""
+	@echo "Build Tool:"
+	@echo "  build            - Build dev tool for current platform"
+	@echo "  build-all        - Build dev tool for all platforms"
+	@echo "  build-linux      - Build dev tool for Linux"
+	@echo "  build-darwin     - Build dev tool for macOS"
+	@echo "  build-windows    - Build dev tool for Windows"
+	@echo "  clean            - Clean build artifacts"
+	@echo "  deps             - Install dependencies"
+	@echo ""
+	@echo "Debian Packaging:"
+	@echo "  deb-all          - Build .deb packages for all architectures and Debian versions"
+	@echo "  deb-amd64        - Build .deb for amd64 (Debian Bookworm)"
+	@echo "  deb-arm64        - Build .deb for arm64 (Debian Bookworm)"
+	@echo "  deb-armhf        - Build .deb for armhf (Debian Bookworm)"
+	@echo "  deb-custom       - Build .deb with custom version/arch/debian version"
+	@echo "  deb-clean        - Clean Debian build artifacts"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  changelog        - Generate changelog from git history"
+	@echo "  changelog-next   - Generate changelog for next version"
+	@echo "  validate-commits - Validate commit messages"
+	@echo "  setup-changelog  - Setup changelog tooling"
+	@echo "  help             - Show this help"
 
+.PHONY: build build-all build-linux build-darwin build-windows clean deps changelog changelog-next validate-commits setup-changelog deb-all deb-amd64 deb-arm64 deb-armhf deb-custom deb-clean help
