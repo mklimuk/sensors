@@ -7,6 +7,7 @@ import (
 	"github.com/mklimuk/sensors"
 	"periph.io/x/conn/v3/i2c"
 	"periph.io/x/conn/v3/i2c/i2creg"
+	"periph.io/x/conn/v3/physic"
 	"periph.io/x/host/v3"
 )
 
@@ -47,6 +48,12 @@ func (b *GenericBus) WriteToAddr(ctx context.Context, address byte, buffer []byt
 		return fmt.Errorf("could not write to i2c bus %x: %w", address, err)
 	}
 	return nil
+}
+
+func (b *GenericBus) SetSpeed(speed int) error {
+	freq := physic.Frequency(speed)
+	fmt.Println("setting speed to", freq.String())
+	return b.bus.SetSpeed(freq)
 }
 
 func (b *GenericBus) Release(ctx context.Context) error {
