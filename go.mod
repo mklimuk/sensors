@@ -2,7 +2,7 @@ module github.com/mklimuk/sensors
 
 go 1.24
 
-toolchain go1.24.4
+toolchain go1.24
 
 require (
 	github.com/charmbracelet/log v0.4.2
