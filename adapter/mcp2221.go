@@ -15,6 +15,7 @@ import (
 	"github.com/karalabe/hid"
 
 	"github.com/mklimuk/sensors/cmd/sensors/console"
+	"github.com/mklimuk/sensors/snsctx"
 )
 
 /*
@@ -849,7 +850,7 @@ func (d *MCP2221) waitAndReceive(ctx context.Context, delay time.Duration) error
 }
 
 func (d *MCP2221) send(ctx context.Context) error {
-	verbose := console.IsVerbose(ctx)
+	verbose := snsctx.IsVerbose(ctx)
 	if verbose {
 		console.Printf("sending message to mcp2221:\n%s\n", hex.Dump(d.request))
 	}
@@ -873,7 +874,7 @@ func (d *MCP2221) receive(ctx context.Context) error {
 	if n != 64 {
 		return fmt.Errorf("short read: %d", n)
 	}
-	verbose := console.IsVerbose(ctx)
+	verbose := snsctx.IsVerbose(ctx)
 	if verbose {
 		console.Printf("read message from adapter:\n%s\n", hex.Dump(d.response))
 	}
