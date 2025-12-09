@@ -2,7 +2,9 @@ package i2c
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"log/slog"
 
 	"github.com/mklimuk/sensors"
 	"periph.io/x/conn/v3/i2c"
@@ -17,14 +19,12 @@ type GenericBus struct {
 	bus i2c.BusCloser
 }
 
-func NewGenericBus(dev string) (*GenericBus, error) {
-	state, err := host.Init()
+func NewGenericBus(ctx context.Context, dev string) (*GenericBus, error) {
+	_, err := host.Init()
 	if err != nil {
 		return nil, fmt.Errorf("could not init host: %w", err)
 	}
-	for _, driver := range state.Loaded {
-		fmt.Println(driver.String())
-	}
+	slog.Debug("opening i2c bus", "device", dev)
 	bus, err := i2creg.Open(dev)
 	if err != nil {
 		return nil, fmt.Errorf("could not open i2c bus: %w", err)
@@ -39,10 +39,12 @@ func (b *GenericBus) ReadFromAddr(ctx context.Context, address byte, buffer []by
 	if err != nil {
 		return fmt.Errorf("could not read from i2c bus %x: %w", address, err)
 	}
+	slog.Debug("i2c read completed", "address", address, "buffer", hex.Dump(buffer))
 	return nil
 }
 
 func (b *GenericBus) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
+	slog.Debug("writing to i2c bus", "address", address, "buffer", hex.Dump(buffer))
 	err := b.bus.Tx(uint16(address), buffer, nil)
 	if err != nil {
 		return fmt.Errorf("could not write to i2c bus %x: %w", address, err)
