@@ -8,6 +8,7 @@ import (
 
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
+	"github.com/mklimuk/sensors/snsctx"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -33,7 +34,7 @@ var mcp2221StatusCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		status, err := a.Status(ctx)
 		if err != nil {
 			return console.Exit(1, "adapter communication error: %s", console.Red(err))
@@ -67,7 +68,7 @@ var mcp2221ReleaseCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		status, err := a.ReleaseBus(ctx)
 		if err != nil {
 			return console.Exit(1, "adapter communication error: %s", console.Red(err))
@@ -92,7 +93,7 @@ var mcp2221ResetCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		err = a.Reset(ctx)
 		if err != nil {
 			return console.Exit(1, "adapter communication error: %s", console.Red(err))
@@ -122,7 +123,7 @@ var mcp2221GPIOReadCmd = cli.Command{
 		if err != nil {
 			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 		}
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		err = a.SetGPIOParameters(ctx, adapter.MCP2221GPIOParameters{
 			GPIO0Mode: adapter.GPIOModeIn,
 			GPIO1Mode: adapter.GPIOModeIn,

@@ -9,6 +9,7 @@ import (
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
 	"github.com/mklimuk/sensors/i2c"
+	"github.com/mklimuk/sensors/snsctx"
 	"github.com/urfave/cli/v2"
 )
 
@@ -35,7 +36,7 @@ var tempReadCmd = cli.Command{
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 
 		var a sensors.I2CBus
 		switch c.String("adapter") {
@@ -50,7 +51,7 @@ var tempReadCmd = cli.Command{
 			fallthrough
 		case "nanopi":
 			var err error
-			bus, err := i2c.NewGenericBus(c.String("device"))
+			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}

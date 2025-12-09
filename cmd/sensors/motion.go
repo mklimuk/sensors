@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/mklimuk/sensors/accel"
+	"github.com/mklimuk/sensors/snsctx"
 
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
@@ -33,7 +34,7 @@ var motionInitCmd = cli.Command{
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		switch c.String("sensor") {
 		case "bma220":
 			switch c.String("adapter") {
@@ -63,7 +64,7 @@ var motionCheckCmd = cli.Command{
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		switch c.String("sensor") {
 		case "bma220":
 			switch c.String("adapter") {
@@ -103,7 +104,7 @@ var motionResetCmd = cli.Command{
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
-		ctx := console.SetVerbose(context.Background(), c.Bool("verbose"))
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		switch c.String("sensor") {
 		case "bma220":
 			switch c.String("adapter") {

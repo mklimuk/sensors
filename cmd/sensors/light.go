@@ -12,6 +12,7 @@ import (
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/environment"
+	"github.com/mklimuk/sensors/snsctx"
 )
 
 var lightCmd = cli.Command{
@@ -41,7 +42,7 @@ var lightReadCmd = cli.Command{
 	},
 	Action: func(c *cli.Context) error {
 		verbose := c.Bool("verbose")
-		ctx := console.SetVerbose(context.Background(), verbose)
+		ctx := snsctx.SetVerbose(context.Background(), verbose)
 		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
 			ReportCaller:    true,
 			ReportTimestamp: true,

@@ -4,8 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
+	"time"
 
+	chlog "github.com/charmbracelet/log"
+	"github.com/muesli/termenv"
 	"github.com/urfave/cli/v2"
 )
 
@@ -23,6 +27,26 @@ func run() int {
 	app.EnableBashCompletion = true
 	app.Version = fmt.Sprintf("%s-%s-%s", version, date, commit)
 	app.Usage = "sensors cli"
+	app.Flags = []cli.Flag{
+		&cli.BoolFlag{
+			Name:  "verbose",
+			Usage: "enable verbose logging",
+		},
+	}
+	app.Before = func(ctx *cli.Context) error {
+		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
+			ReportCaller:    true,
+			ReportTimestamp: true,
+			TimeFormat:      time.DateTime,
+		})
+		charm.SetColorProfile(termenv.TrueColor)
+		charm.SetLevel(chlog.InfoLevel)
+		if ctx.Bool("verbose") {
+			charm.SetLevel(chlog.DebugLevel)
+		}
+		slog.SetDefault(slog.New(charm))
+		return nil
+	}
 	app.Commands = cli.Commands{
 		&tempReadCmd,
 		&usbCmd,

@@ -9,6 +9,7 @@ import (
 	"github.com/mklimuk/sensors/adapter"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/gpio"
+	"github.com/mklimuk/sensors/snsctx"
 	"github.com/urfave/cli/v2"
 )
 
@@ -33,6 +34,7 @@ var gpioReadCmd = cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
+		ctx := snsctx.SetVerbose(context.Background(), c.Bool("verbose"))
 		addr := c.Int("address")
 		mcp2221 := adapter.NewMCP2221()
 		err := mcp2221.Init()
