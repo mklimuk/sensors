@@ -2,8 +2,8 @@ package air
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/mklimuk/sensors"
@@ -34,28 +34,144 @@ const (
 
 var ErrNotReady = fmt.Errorf("ags02ma: data not ready or sensor in pre-heat stage")
 
+type AGS02MAOpts struct {
+	ConfigureDelay time.Duration
+	ReadDelay      time.Duration
+	TxDelay        time.Duration
+}
+
+type AGS02MAOpt func(*AGS02MAOpts)
+
+func WithConfigureDelay(delay time.Duration) AGS02MAOpt {
+	return func(o *AGS02MAOpts) {
+		o.ConfigureDelay = delay
+	}
+}
+
+func WithReadDelay(delay time.Duration) AGS02MAOpt {
+	return func(o *AGS02MAOpts) {
+		o.ReadDelay = delay
+	}
+}
+
+func WithTxDelay(delay time.Duration) AGS02MAOpt {
+	return func(o *AGS02MAOpts) {
+		o.TxDelay = delay
+	}
+}
+
 // AGS02MA represents Aosong AGS02MA TVOC sensor.
 // Typical usage:
-//   s := NewAGS02MA(bus)
-//   v, err := s.GetTVOC(ctx)
+//
+//	s := NewAGS02MA(bus)
+//	v, err := s.GetTVOC(ctx)
+//
 // Value is returned in parts-per-billion (ppb) as integer.
 // Note: The sensor requires a slow I2C clock (<= 30 kHz). Ensure adapter supports it.
-
 type AGS02MA struct {
+	mx        sync.Mutex
+	delayDone chan struct{} // closed when delay after last operation completes
+	delayMx   sync.Mutex    // protects delayDone channel
+
+	config AGS02MAOpts
+
 	transport sensors.I2CBus
 	addr      byte
 	buf       []byte
 }
 
-func NewAGS02MA(transport sensors.I2CBus) *AGS02MA {
-	return &AGS02MA{transport: transport, addr: ags02maAddress, buf: make([]byte, 64)}
+func NewAGS02MA(transport sensors.I2CBus, opts ...AGS02MAOpt) *AGS02MA {
+	config := AGS02MAOpts{
+		ConfigureDelay: 2 * time.Second,
+		ReadDelay:      1500 * time.Millisecond,
+		TxDelay:        100 * time.Millisecond,
+	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	// Create a closed channel so first operation can proceed immediately
+	ch := make(chan struct{})
+	close(ch)
+	return &AGS02MA{
+		config:    config,
+		transport: transport,
+		addr:      ags02maAddress,
+		buf:       make([]byte, 5),
+		delayDone: ch, // initially ready (closed channel)
+	}
+}
+
+// waitForDelay waits for any pending delay from previous operations to complete.
+func (s *AGS02MA) waitForDelay(ctx context.Context) error {
+	s.delayMx.Lock()
+	ch := s.delayDone
+	s.delayMx.Unlock()
+
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// scheduleDelay schedules a delay in a goroutine and updates delayDone channel when complete.
+func (s *AGS02MA) scheduleDelay(ctx context.Context, duration time.Duration) {
+	s.delayMx.Lock()
+	// Create new channel for this delay
+	ch := make(chan struct{})
+	s.delayDone = ch
+	s.delayMx.Unlock()
+
+	go func() {
+		timer := time.NewTimer(duration)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			close(ch)
+		case <-ctx.Done():
+			close(ch)
+		}
+	}()
+}
+
+func (s *AGS02MA) Close(ctx context.Context) {
+	// Wait for any pending delay to complete
+	_ = s.waitForDelay(ctx)
+}
+
+func (s *AGS02MA) Configure(ctx context.Context) error {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return err
+	}
+
+	s.mx.Lock()
+	err := s.transport.WriteToAddr(ctx, s.addr, []byte{regTVOC, 0x00, 0xFF, 0x00, 0xFF, 0x30})
+	s.mx.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("ags02ma: configuration write failed: %w", err)
+	}
+	// Recommended 2 second delay after configuration (runs asynchronously)
+	s.scheduleDelay(ctx, s.config.ConfigureDelay)
+	return nil
 }
 
 // GetTVOC performs a "master direct read" as described in the datasheet.
 // This does NOT write the register first and simply reads 4 bytes.
 // The first byte is status; the remaining three make a 24-bit big-endian ppb value.
 func (s *AGS02MA) GetTVOC(ctx context.Context) (uint32, error) {
-	if err := s.transport.ReadFromAddr(ctx, s.addr, s.buf[:4]); err != nil {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return 0, err
+	}
+
+	s.mx.Lock()
+	err := s.transport.ReadFromAddr(ctx, s.addr, s.buf)
+	s.mx.Unlock()
+
+	if err != nil {
 		return 0, fmt.Errorf("ags02ma: read failed: %w", err)
 	}
 	status := s.buf[0]
@@ -63,22 +179,45 @@ func (s *AGS02MA) GetTVOC(ctx context.Context) (uint32, error) {
 		return 0, ErrNotReady
 	}
 	ppb := (uint32(s.buf[1]) << 16) | (uint32(s.buf[2]) << 8) | uint32(s.buf[3])
+	// Recommended 1.5 second delay after TVOC read (runs asynchronously)
+	s.scheduleDelay(ctx, s.config.ReadDelay)
 	return ppb, nil
 }
 
-// GetTVOCWithRegisterRead explicitly writes register 0x00 and then reads.
+// GetTVOCWithRegisterWrite explicitly writes register 0x00 and then reads.
 // Some hosts or sequences may prefer this form. A small wait can be added to
 // allow the device to update data, but the RDY bit is authoritative.
-func (s *AGS02MA) GetTVOCWithRegisterRead(ctx context.Context) (uint32, error) {
-	if err := s.transport.WriteToAddr(ctx, s.addr, []byte{regTVOC}); err != nil {
+func (s *AGS02MA) GetTVOCWithRegisterWrite(ctx context.Context) (uint32, error) {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return 0, err
+	}
+
+	s.mx.Lock()
+	err := s.transport.WriteToAddr(ctx, s.addr, []byte{regTVOC})
+	s.mx.Unlock()
+
+	if err != nil {
 		return 0, fmt.Errorf("ags02ma: write reg 0x00 failed: %w", err)
 	}
+
 	// Small guard delay; actual readiness is indicated by RDY bit.
-	time.Sleep(2 * time.Second)
-	if err := s.transport.ReadFromAddr(ctx, s.addr, s.buf[:32]); err != nil {
+	// This is part of the operation sequence, so we wait synchronously.
+	timer := time.NewTimer(s.config.TxDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	s.mx.Lock()
+	err = s.transport.ReadFromAddr(ctx, s.addr, s.buf)
+	s.mx.Unlock()
+
+	if err != nil {
 		return 0, fmt.Errorf("ags02ma: read failed: %w", err)
 	}
-	fmt.Println("buf", hex.Dump(s.buf[:32]))
 	crc := checkCRC(s.buf[:4])
 	if crc != s.buf[4] {
 		return 0, fmt.Errorf("ags02ma: crc mismatch: expected %#x, got %#x", s.buf[4], crc)
@@ -88,18 +227,41 @@ func (s *AGS02MA) GetTVOCWithRegisterRead(ctx context.Context) (uint32, error) {
 		return 0, ErrNotReady
 	}
 	ppb := (uint32(s.buf[1]) << 16) | (uint32(s.buf[2]) << 8) | uint32(s.buf[3])
+	// Recommended 1.5 second delay after TVOC read (runs asynchronously)
+	s.scheduleDelay(ctx, s.config.ReadDelay)
 	return ppb, nil
 }
 
 func (s *AGS02MA) ReadVersion(ctx context.Context) (int, error) {
-	if err := s.transport.WriteToAddr(ctx, s.addr, []byte{regVersion}); err != nil {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return 0, err
+	}
+
+	s.mx.Lock()
+	err := s.transport.WriteToAddr(ctx, s.addr, []byte{regVersion})
+	if err != nil {
+		s.mx.Unlock()
 		return 0, fmt.Errorf("ags02ma: write reg 0x11 failed: %w", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	if err := s.transport.ReadFromAddr(ctx, s.addr, s.buf[:5]); err != nil {
+	s.mx.Unlock()
+
+	// Small guard delay; part of the operation sequence, so we wait synchronously.
+	timer := time.NewTimer(s.config.TxDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	s.mx.Lock()
+	err = s.transport.ReadFromAddr(ctx, s.addr, s.buf)
+	s.mx.Unlock()
+
+	if err != nil {
 		return 0, fmt.Errorf("ags02ma: read failed: %w", err)
 	}
-	fmt.Println("buf", hex.Dump(s.buf[:5]))
 	crc := checkCRC(s.buf[:4])
 	if crc != s.buf[4] {
 		return 0, fmt.Errorf("ags02ma: crc mismatch: expected %#x, got %#x", s.buf[4], crc)
@@ -108,34 +270,80 @@ func (s *AGS02MA) ReadVersion(ctx context.Context) (int, error) {
 }
 
 func (s *AGS02MA) ReadResistance(ctx context.Context) (int, error) {
-	if err := s.transport.WriteToAddr(ctx, s.addr, []byte{regResistance}); err != nil {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return 0, err
+	}
+
+	s.mx.Lock()
+	err := s.transport.WriteToAddr(ctx, s.addr, []byte{regResistance})
+	if err != nil {
+		s.mx.Unlock()
 		return 0, fmt.Errorf("ags02ma: write reg 0x20 failed: %w", err)
 	}
-	time.Sleep(2 * time.Second)
-	if err := s.transport.ReadFromAddr(ctx, s.addr, s.buf[:5]); err != nil {
+	s.mx.Unlock()
+
+	// Small guard delay; part of the operation sequence, so we wait synchronously.
+	timer := time.NewTimer(s.config.TxDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	s.mx.Lock()
+	err = s.transport.ReadFromAddr(ctx, s.addr, s.buf)
+	s.mx.Unlock()
+
+	if err != nil {
 		return 0, fmt.Errorf("ags02ma: read failed: %w", err)
 	}
-	fmt.Println("buf", hex.Dump(s.buf[:5]))
 	crc := checkCRC(s.buf[:4])
 	if crc != s.buf[4] {
 		return 0, fmt.Errorf("ags02ma: crc mismatch: expected %#x, got %#x", s.buf[4], crc)
 	}
+	// Recommended 1.5 second delay after resistance read (runs asynchronously)
+	s.scheduleDelay(ctx, s.config.ReadDelay)
 	return int(s.buf[3]), nil
 }
 
 func (s *AGS02MA) Calibrate(ctx context.Context) error {
-	if err := s.transport.WriteToAddr(ctx, s.addr, []byte{regCalibrate}); err != nil {
+	// Wait for any pending delay from previous operations
+	if err := s.waitForDelay(ctx); err != nil {
+		return err
+	}
+
+	s.mx.Lock()
+	err := s.transport.WriteToAddr(ctx, s.addr, []byte{regCalibrate})
+	if err != nil {
+		s.mx.Unlock()
 		return fmt.Errorf("ags02ma: write reg 0x01 failed: %w", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	if err := s.transport.ReadFromAddr(ctx, s.addr, s.buf[:5]); err != nil {
+	s.mx.Unlock()
+
+	// Small guard delay; part of the operation sequence, so we wait synchronously.
+	timer := time.NewTimer(s.config.TxDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	s.mx.Lock()
+	err = s.transport.ReadFromAddr(ctx, s.addr, s.buf)
+	s.mx.Unlock()
+
+	if err != nil {
 		return fmt.Errorf("ags02ma: read failed: %w", err)
 	}
-	fmt.Println("buf", hex.Dump(s.buf[:5]))
 	crc := checkCRC(s.buf[:4])
 	if crc != s.buf[4] {
 		return fmt.Errorf("ags02ma: crc mismatch: expected %#x, got %#x", s.buf[4], crc)
 	}
+	// Recommended 1.5 second delay after calibrate (runs asynchronously)
+	s.scheduleDelay(ctx, s.config.ReadDelay)
 	return nil
 }
 
@@ -145,7 +353,7 @@ func checkCRC(data []byte) byte {
 	crc := byte(0xFF)
 	for _, b := range data {
 		crc ^= b
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			if crc&0x80 != 0 {
 				crc = (crc << 1) ^ 0x31
 			} else {
