@@ -160,9 +160,23 @@ var airReadTvocCmd = cli.Command{
 			Name:  "device,d",
 			Value: "/dev/i2c-1",
 		},
+		&cli.StringFlag{
+			Name:  "mode,m",
+			Value: "register-write",
+			Usage: "mode to use for TVOC read",
+		},
 		&cli.BoolFlag{Name: "verbose,v"},
 	},
 	Action: func(c *cli.Context) error {
+		modeStr := c.String("mode")
+		if modeStr != "direct-read" && modeStr != "register-write" {
+			return console.Exit(1, "invalid mode: %s", console.Red(modeStr))
+		}
+		mode := air.TVOCModeRegisterWrite
+		if modeStr == "direct-read" {
+			mode = air.TVOCModeDirectRead
+		}
+
 		verbose := c.Bool("verbose")
 		ctx := snsctx.SetVerbose(context.Background(), verbose)
 		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
@@ -182,12 +196,7 @@ var airReadTvocCmd = cli.Command{
 			if err := ad.Init(); err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
-			s = air.NewAGS02MA(ad)
-			ppb, err := s.GetTVOC(ctx)
-			if err != nil {
-				return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
-			}
-			console.Printf("%d ppb\n", ppb)
+			s = air.NewAGS02MA(ad, air.WithTVOCMode(mode))
 		case "generic":
 			fallthrough
 		case "nanopi":
@@ -202,7 +211,7 @@ var airReadTvocCmd = cli.Command{
 				}
 			}()
 			bus.SetSpeed(20_000_000_000) // 20 kHz
-			s = air.NewAGS02MA(bus)
+			s = air.NewAGS02MA(bus, air.WithTVOCMode(mode))
 		}
 
 		err := s.Configure(ctx)
@@ -211,7 +220,7 @@ var airReadTvocCmd = cli.Command{
 		}
 		console.Printf("sensor configured\n")
 
-		ppb, err := s.GetTVOCWithRegisterWrite(ctx)
+		ppb, err := s.GetTVOC(ctx)
 		if err != nil {
 			return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
 		}

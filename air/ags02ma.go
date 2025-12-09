@@ -34,10 +34,16 @@ const (
 
 var ErrNotReady = fmt.Errorf("ags02ma: data not ready or sensor in pre-heat stage")
 
+const (
+	TVOCModeDirectRead    byte = 0x00
+	TVOCModeRegisterWrite byte = 0x01
+)
+
 type AGS02MAOpts struct {
 	ConfigureDelay time.Duration
 	ReadDelay      time.Duration
 	TxDelay        time.Duration
+	TVOCMode       byte
 }
 
 type AGS02MAOpt func(*AGS02MAOpts)
@@ -57,6 +63,12 @@ func WithReadDelay(delay time.Duration) AGS02MAOpt {
 func WithTxDelay(delay time.Duration) AGS02MAOpt {
 	return func(o *AGS02MAOpts) {
 		o.TxDelay = delay
+	}
+}
+
+func WithTVOCMode(mode byte) AGS02MAOpt {
+	return func(o *AGS02MAOpts) {
+		o.TVOCMode = mode
 	}
 }
 
@@ -85,6 +97,7 @@ func NewAGS02MA(transport sensors.I2CBus, opts ...AGS02MAOpt) *AGS02MA {
 		ConfigureDelay: 2 * time.Second,
 		ReadDelay:      1500 * time.Millisecond,
 		TxDelay:        100 * time.Millisecond,
+		TVOCMode:       TVOCModeRegisterWrite,
 	}
 	for _, opt := range opts {
 		opt(&config)
@@ -158,10 +171,19 @@ func (s *AGS02MA) Configure(ctx context.Context) error {
 	return nil
 }
 
-// GetTVOC performs a "master direct read" as described in the datasheet.
+// GetTVOC performs a "master direct read" or "register write" as described in the datasheet.
+// The mode is determined by the TVOCMode configuration option.
+func (s *AGS02MA) GetTVOC(ctx context.Context) (uint32, error) {
+	if s.config.TVOCMode == TVOCModeDirectRead {
+		return s.GetTVOCDirectRead(ctx)
+	}
+	return s.GetTVOCWithRegisterWrite(ctx)
+}
+
+// GetTVOCDirectRead performs a "master direct read" as described in the datasheet.
 // This does NOT write the register first and simply reads 4 bytes.
 // The first byte is status; the remaining three make a 24-bit big-endian ppb value.
-func (s *AGS02MA) GetTVOC(ctx context.Context) (uint32, error) {
+func (s *AGS02MA) GetTVOCDirectRead(ctx context.Context) (uint32, error) {
 	// Wait for any pending delay from previous operations
 	if err := s.waitForDelay(ctx); err != nil {
 		return 0, err
