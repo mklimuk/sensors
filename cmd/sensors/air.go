@@ -13,13 +13,75 @@ import (
 	"github.com/mklimuk/sensors/air"
 	"github.com/mklimuk/sensors/cmd/sensors/console"
 	"github.com/mklimuk/sensors/i2c"
+	"github.com/mklimuk/sensors/snsctx"
 )
 
 var airCmd = cli.Command{
 	Name: "air",
 	Subcommands: []*cli.Command{
-		&airReadCmd,
+		&airVersionCmd,
+		&airReadTvocCmd,
 		&airCalibrateCmd,
+		&airReadResistanceCmd,
+	},
+}
+
+var airVersionCmd = cli.Command{
+	Name: "version",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "adapter,a",
+			Value: "mcp2221",
+		},
+		&cli.StringFlag{
+			Name:  "device,d",
+			Value: "/dev/i2c-1",
+		},
+		&cli.BoolFlag{Name: "verbose,v"},
+	},
+	Action: func(c *cli.Context) error {
+		verbose := c.Bool("verbose")
+		ctx := snsctx.SetVerbose(context.Background(), verbose)
+		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
+			ReportCaller:    true,
+			ReportTimestamp: true,
+			TimeFormat:      time.DateTime,
+		})
+		if verbose {
+			charm.SetLevel(chlog.DebugLevel)
+		}
+		slog.SetDefault(slog.New(charm))
+
+		var s *air.AGS02MA
+		switch c.String("adapter") {
+		case "mcp2221":
+			ad := adapter.NewMCP2221()
+			if err := ad.Init(); err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+			}
+			s = air.NewAGS02MA(ad)
+		case "generic":
+			fallthrough
+		case "nanopi":
+			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			if err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+			}
+			defer func() {
+				err := bus.Close()
+				if err != nil {
+					console.Errorf("error closing bus: %s", console.Red(err))
+				}
+			}()
+			bus.SetSpeed(20_000_000_000) // 20 kHz
+			s = air.NewAGS02MA(bus)
+		}
+		ver, err := s.ReadVersion(ctx)
+		if err != nil {
+			return console.Exit(1, "error reading version: %s", console.Red(err))
+		}
+		console.Printf("firmwareversion: %d\n", ver)
+		return nil
 	},
 }
 
@@ -38,7 +100,7 @@ var airCalibrateCmd = cli.Command{
 	},
 	Action: func(c *cli.Context) error {
 		verbose := c.Bool("verbose")
-		ctx := console.SetVerbose(context.Background(), verbose)
+		ctx := snsctx.SetVerbose(context.Background(), verbose)
 		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
 			ReportCaller:    true,
 			ReportTimestamp: true,
@@ -49,22 +111,18 @@ var airCalibrateCmd = cli.Command{
 		}
 		slog.SetDefault(slog.New(charm))
 
+		var s *air.AGS02MA
 		switch c.String("adapter") {
 		case "mcp2221":
 			ad := adapter.NewMCP2221()
 			if err := ad.Init(); err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
-			s := air.NewAGS02MA(ad)
-			err := s.Calibrate(ctx)
-			if err != nil {
-				return console.Exit(1, "error calibrating: %s", console.Red(err))
-			}
-			console.Printf("calibrated\n")
+			s = air.NewAGS02MA(ad)
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(c.String("device"))
+			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
@@ -75,20 +133,24 @@ var airCalibrateCmd = cli.Command{
 				}
 			}()
 			bus.SetSpeed(20_000_000_000) // 20 kHz
-			s := air.NewAGS02MA(bus)
-			err = s.Calibrate(ctx)
-			if err != nil {
-				return console.Exit(1, "error calibrating: %s", console.Red(err))
-			}
-			console.Printf("calibrated\n")
+			s = air.NewAGS02MA(bus)
 		}
+		err := s.Configure(ctx)
+		if err != nil {
+			return console.Exit(1, "error configuring: %s", console.Red(err))
+		}
+		console.Printf("ags02ma configured\n")
+		err = s.Calibrate(ctx)
+		if err != nil {
+			return console.Exit(1, "error calibrating: %s", console.Red(err))
+		}
+		console.Printf("sensor calibrated\n")
 		return nil
 	},
 }
 
-var airReadCmd = cli.Command{
-	Name:    "read",
-	Aliases: []string{"rd"},
+var airReadTvocCmd = cli.Command{
+	Name: "tvoc",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:  "adapter,a",
@@ -102,7 +164,7 @@ var airReadCmd = cli.Command{
 	},
 	Action: func(c *cli.Context) error {
 		verbose := c.Bool("verbose")
-		ctx := console.SetVerbose(context.Background(), verbose)
+		ctx := snsctx.SetVerbose(context.Background(), verbose)
 		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
 			ReportCaller:    true,
 			ReportTimestamp: true,
@@ -113,13 +175,14 @@ var airReadCmd = cli.Command{
 		}
 		slog.SetDefault(slog.New(charm))
 
+		var s *air.AGS02MA
 		switch c.String("adapter") {
 		case "mcp2221":
 			ad := adapter.NewMCP2221()
 			if err := ad.Init(); err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
-			s := air.NewAGS02MA(ad)
+			s = air.NewAGS02MA(ad)
 			ppb, err := s.GetTVOC(ctx)
 			if err != nil {
 				return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
@@ -128,7 +191,7 @@ var airReadCmd = cli.Command{
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(c.String("device"))
+			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
@@ -139,23 +202,91 @@ var airReadCmd = cli.Command{
 				}
 			}()
 			bus.SetSpeed(20_000_000_000) // 20 kHz
-			s := air.NewAGS02MA(bus)
-			ver, err := s.ReadVersion(ctx)
-			if err != nil {
-				return console.Exit(1, "error reading version: %s", console.Red(err))
+			s = air.NewAGS02MA(bus)
+		}
+
+		err := s.Configure(ctx)
+		if err != nil {
+			return console.Exit(1, "error configuring: %s", console.Red(err))
+		}
+		console.Printf("sensor configured\n")
+
+		ppb, err := s.GetTVOCWithRegisterWrite(ctx)
+		if err != nil {
+			return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
+		}
+		console.Printf("%d ppb\n", ppb)
+		return nil
+	},
+}
+
+var airReadResistanceCmd = cli.Command{
+	Name: "resistance",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "adapter,a",
+			Value: "mcp2221",
+		},
+		&cli.StringFlag{
+			Name:  "device,d",
+			Value: "/dev/i2c-1",
+		},
+		&cli.BoolFlag{Name: "verbose,v"},
+	},
+	Action: func(c *cli.Context) error {
+		verbose := c.Bool("verbose")
+		ctx := snsctx.SetVerbose(context.Background(), verbose)
+		charm := chlog.NewWithOptions(os.Stdout, chlog.Options{
+			ReportCaller:    true,
+			ReportTimestamp: true,
+			TimeFormat:      time.DateTime,
+		})
+		if verbose {
+			charm.SetLevel(chlog.DebugLevel)
+		}
+		slog.SetDefault(slog.New(charm))
+
+		var s *air.AGS02MA
+		switch c.String("adapter") {
+		case "mcp2221":
+			ad := adapter.NewMCP2221()
+			if err := ad.Init(); err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
-			resistance, err := s.ReadResistance(ctx)
-			if err != nil {
-				return console.Exit(1, "error reading resistance: %s", console.Red(err))
-			}
-			console.Printf("resistance: %d\n", resistance)
-			console.Printf("version: %d\n", ver)
-			ppb, err := s.GetTVOCWithRegisterRead(ctx)
+			s = air.NewAGS02MA(ad)
+			ppb, err := s.GetTVOC(ctx)
 			if err != nil {
 				return console.Exit(1, "error getting TVOC read: %s", console.Red(err))
 			}
 			console.Printf("%d ppb\n", ppb)
+		case "generic":
+			fallthrough
+		case "nanopi":
+			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			if err != nil {
+				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+			}
+			defer func() {
+				err := bus.Close()
+				if err != nil {
+					console.Errorf("error closing bus: %s", console.Red(err))
+				}
+			}()
+			bus.SetSpeed(20_000_000_000) // 20 kHz
+			s = air.NewAGS02MA(bus)
 		}
+
+		err := s.Configure(ctx)
+		if err != nil {
+			return console.Exit(1, "error configuring: %s", console.Red(err))
+		}
+		console.Printf("sensor configured\n")
+
+		resistance, err := s.ReadResistance(ctx)
+		if err != nil {
+			return console.Exit(1, "error getting resistance read: %s", console.Red(err))
+		}
+		console.Printf("%d Ohms resistance\n", resistance)
 		return nil
 	},
 }
