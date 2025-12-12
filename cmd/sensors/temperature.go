@@ -51,7 +51,7 @@ var tempReadCmd = cli.Command{
 			fallthrough
 		case "nanopi":
 			var err error
-			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			bus, err := i2c.NewGenericBus(c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}

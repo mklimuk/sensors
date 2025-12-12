@@ -63,7 +63,7 @@ var airVersionCmd = cli.Command{
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			bus, err := i2c.NewGenericBus(c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
@@ -122,7 +122,7 @@ var airCalibrateCmd = cli.Command{
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			bus, err := i2c.NewGenericBus(c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
@@ -200,7 +200,7 @@ var airReadTvocCmd = cli.Command{
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			bus, err := i2c.NewGenericBus(c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}
@@ -271,7 +271,7 @@ var airReadResistanceCmd = cli.Command{
 		case "generic":
 			fallthrough
 		case "nanopi":
-			bus, err := i2c.NewGenericBus(ctx, c.String("device"))
+			bus, err := i2c.NewGenericBus(c.String("device"))
 			if err != nil {
 				return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 			}

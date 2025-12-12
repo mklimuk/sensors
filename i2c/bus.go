@@ -19,7 +19,7 @@ type GenericBus struct {
 	bus i2c.BusCloser
 }
 
-func NewGenericBus(ctx context.Context, dev string) (*GenericBus, error) {
+func NewGenericBus(dev string) (*GenericBus, error) {
 	_, err := host.Init()
 	if err != nil {
 		return nil, fmt.Errorf("could not init host: %w", err)
