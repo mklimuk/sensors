@@ -40,9 +40,23 @@ func BuildCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("could not get no-cache flag: %w", err)
 			}
+			target, err := cmd.Flags().GetString("target")
+			if err != nil {
+				return fmt.Errorf("could not get target flag: %w", err)
+			}
+
+			var image string
+			switch target {
+			case "debian-bookworm":
+				image = "gophertribe/gobuild:1.25-bookworm"
+			case "debian-buster":
+				image = "mklimuk/gobuild:1.24-cross-buster"
+			default:
+				return fmt.Errorf("invalid target: %s", target)
+			}
 			return build.Docker(cmd.Context(), fmt.Sprintf("./dev-%s-%s", os, arch), []string{"build", "--version", version, "--cross-os", crossOs, "--cross-arch", crossArch}, build.DockerBuildOpts{
 				NoCache: noCache,
-				Image:   "gophertribe/gobuild:1.25-bookworm",
+				Image:   image,
 			})
 		},
 	}
@@ -52,6 +66,7 @@ func BuildCmd() *cobra.Command {
 	cmd.Flags().String("arch", runtime.GOARCH, "arch to build for")
 	cmd.Flags().String("cross-os", "", "os to cross-compile for")
 	cmd.Flags().String("cross-arch", "", "arch to cross-compile for")
+	cmd.Flags().String("target", "debian-bookworm", "target to build for")
 
 	return cmd
 }

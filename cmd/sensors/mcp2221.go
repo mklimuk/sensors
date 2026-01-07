@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mklimuk/sensors/adapter"
@@ -20,6 +22,7 @@ var mcp2221Cmd = cli.Command{
 		&mcp2221ReleaseCmd,
 		&mcp2221GPIOCmd,
 		&mcp2221ResetCmd,
+		&mcp2221ChipCmd,
 	},
 }
 
@@ -150,6 +153,49 @@ var mcp2221GPIOReadCmd = cli.Command{
 		err = enc.Encode(vals)
 		if err != nil {
 			return console.Exit(1, "values encoding error: %s", console.Red(err))
+		}
+		return nil
+	},
+}
+
+var mcp2221ChipCmd = cli.Command{
+	Name:        "chip",
+	Description: "read mcp2221 chip settings",
+	Subcommands: []*cli.Command{
+		&mcp2221UpdateVendorCmd,
+	},
+	Action: func(c *cli.Context) error {
+		mcp := adapter.NewMCP2221()
+		mcp.SetVendorAndProductID(adapter.VendorID, uint16(adapter.ProductID+c.Int("product")))
+		err := mcp.ReadChipSettings(c.Context)
+		if err != nil {
+			console.Errorf("could not read chip settings: %v", err)
+		}
+		return nil
+	},
+}
+
+var mcp2221UpdateVendorCmd = cli.Command{
+	Name:        "update-vendor",
+	Description: "update mcp2221 vendor and product id",
+	Flags: []cli.Flag{
+		&cli.StringFlag{Name: "vendor", Value: "04d8"},
+		&cli.StringFlag{Name: "product", Value: "00dd"},
+		&cli.BoolFlag{Name: "dryrun"},
+	},
+	Action: func(c *cli.Context) error {
+		vendor, err := hex.DecodeString(strings.TrimPrefix(c.String("vendor"), "0x"))
+		if err != nil {
+			return cli.Exit(fmt.Sprintf("could not decode vendor from string: %v", err), 1)
+		}
+		product, err := hex.DecodeString(strings.TrimPrefix(c.String("product"), "0x"))
+		if err != nil {
+			return cli.Exit(fmt.Sprintf("could not decode product from string: %v", err), 1)
+		}
+		mcp := adapter.NewMCP2221()
+		err = mcp.UpdateVendorAndProductID(c.Context, vendor, product, c.Bool("dryrun"))
+		if err != nil {
+			return cli.Exit(fmt.Sprintf("could not read chip settings: %v", err), 1)
 		}
 		return nil
 	},
