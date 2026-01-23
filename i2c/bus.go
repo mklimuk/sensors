@@ -52,10 +52,27 @@ func (b *GenericBus) WriteToAddr(ctx context.Context, address byte, buffer []byt
 	return nil
 }
 
+// SetSpeed sets the speed of the I2C bus in kHz.
+//
+// Example:
+//
+//	bus.SetSpeed(100) // 100 kHz
+//	bus.SetSpeed(1000) // 1 MHz
+//	bus.SetSpeed(10000) // 10 MHz
+//	bus.SetSpeed(100000) // 100 MHz
+//	bus.SetSpeed(1000000) // 1 GHz
 func (b *GenericBus) SetSpeed(speed int) error {
-	freq := physic.Frequency(speed)
+	var freq physic.Frequency
+	err := freq.Set(fmt.Sprintf("%dkHz", speed))
+	if err != nil {
+		return fmt.Errorf("could not set speed: %w; %s", err, freq.String())
+	}
 	fmt.Println("setting speed to", freq.String())
-	return b.bus.SetSpeed(freq)
+	err = b.bus.SetSpeed(freq)
+	if err != nil {
+		return fmt.Errorf("could not set speed: %w", err)
+	}
+	return nil
 }
 
 func (b *GenericBus) Release(ctx context.Context) error {

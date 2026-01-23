@@ -73,7 +73,7 @@ var airVersionCmd = cli.Command{
 					console.Errorf("error closing bus: %s", console.Red(err))
 				}
 			}()
-			bus.SetSpeed(20_000_000_000) // 20 kHz
+			bus.SetSpeed(20) // 20 kHz
 			s = air.NewAGS02MA(bus)
 		}
 		ver, err := s.ReadVersion(ctx)
@@ -132,7 +132,7 @@ var airCalibrateCmd = cli.Command{
 					console.Errorf("error closing bus: %s", console.Red(err))
 				}
 			}()
-			bus.SetSpeed(20_000_000_000) // 20 kHz
+			bus.SetSpeed(20) // 20 kHz
 			s = air.NewAGS02MA(bus)
 		}
 		err := s.Configure(ctx)
@@ -210,7 +210,7 @@ var airReadTvocCmd = cli.Command{
 					console.Errorf("error closing bus: %s", console.Red(err))
 				}
 			}()
-			bus.SetSpeed(20_000_000_000) // 20 kHz
+			bus.SetSpeed(20) // 20 kHz
 			s = air.NewAGS02MA(bus, air.WithTVOCMode(mode))
 		}
 
@@ -281,7 +281,7 @@ var airReadResistanceCmd = cli.Command{
 					console.Errorf("error closing bus: %s", console.Red(err))
 				}
 			}()
-			bus.SetSpeed(20_000_000_000) // 20 kHz
+			bus.SetSpeed(20) // 20 kHz
 			s = air.NewAGS02MA(bus)
 		}
 
