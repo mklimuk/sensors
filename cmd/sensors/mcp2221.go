@@ -165,8 +165,7 @@ var mcp2221ChipCmd = cli.Command{
 		&mcp2221UpdateVendorCmd,
 	},
 	Action: func(c *cli.Context) error {
-		mcp := adapter.NewMCP2221()
-		mcp.SetVendorAndProductID(adapter.VendorID, uint16(adapter.ProductID+c.Int("product")))
+		mcp := adapter.NewMCP2221(adapter.WithProductID(uint16(adapter.ProductID + c.Int("product"))))
 		err := mcp.ReadChipSettings(c.Context)
 		if err != nil {
 			console.Errorf("could not read chip settings: %v", err)

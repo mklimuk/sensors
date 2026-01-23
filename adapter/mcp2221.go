@@ -219,13 +219,26 @@ var (
 	maxDelay  = 75 * time.Millisecond
 )
 
+type MCP2221Options struct {
+	VendorID    uint16
+	ProductID   uint16
+	DeviceIndex int
+}
+
+type MCP2221Option func(*MCP2221Options)
+
+func WithProductID(productID uint16) MCP2221Option {
+	return func(o *MCP2221Options) {
+		o.ProductID = productID
+	}
+}
+
 type MCP2221 struct {
 	mx           sync.Mutex
 	request      []byte
 	response     []byte
 	responseWait time.Duration
-	vendorID     uint16
-	productID    uint16
+	options      MCP2221Options
 	device       *hid.Device
 }
 
@@ -284,13 +297,19 @@ type MCP2221GPIOParameters struct {
 	GPIO3Designation GPIODesignation `yaml:"GP3_designation"`
 }
 
-func NewMCP2221() *MCP2221 {
+func NewMCP2221(opts ...MCP2221Option) *MCP2221 {
+	options := MCP2221Options{
+		VendorID:  VendorID,
+		ProductID: ProductID,
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
 	return &MCP2221{
 		request:      make([]byte, 64),
 		response:     make([]byte, 64),
 		responseWait: 50 * time.Millisecond,
-		vendorID:     VendorID,
-		productID:    ProductID,
+		options:      options,
 	}
 }
 
@@ -303,15 +322,15 @@ func (d *MCP2221) Init() error {
 
 func (d *MCP2221) connect() error {
 	// Enumerate devices to find the MCP2221
-	devices := hid.Enumerate(d.vendorID, d.productID)
+	devices := hid.Enumerate(d.options.VendorID, d.options.ProductID)
 	if len(devices) == 0 {
-		return fmt.Errorf("could not find hid device vendor: %#x product: %#x", d.vendorID, d.productID)
+		return fmt.Errorf("could not find hid device vendor: %#x product: %#x", d.options.VendorID, d.options.ProductID)
 	}
 
 	// Open the first device found
-	device, err := devices[0].Open()
+	device, err := devices[d.options.DeviceIndex].Open()
 	if err != nil {
-		return fmt.Errorf("could not open hid device vendor: %#x product: %#x: %w", d.vendorID, d.productID, err)
+		return fmt.Errorf("could not open hid device vendor: %#x product: %#x: %w", d.options.VendorID, d.options.ProductID, err)
 	}
 	d.device = device
 	return nil
@@ -326,11 +345,6 @@ func (d *MCP2221) disconnect() error {
 		d.device = nil
 	}
 	return nil
-}
-
-func (d *MCP2221) SetVendorAndProductID(vendor, product uint16) {
-	d.vendorID = vendor
-	d.productID = product
 }
 
 func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
