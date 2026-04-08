@@ -33,3 +33,12 @@ type I2CDevice interface {
 	BusReader
 	BusWriter
 }
+
+// AddressLocker provides per-address mutual exclusion for multi-step I2C
+// sequences (e.g. trigger-write → delay → data-read) that must not be
+// interleaved by another goroutine targeting the same device address.
+// Callers must pair every LockAddr with a corresponding UnlockAddr.
+type AddressLocker interface {
+	LockAddr(addr byte)
+	UnlockAddr(addr byte)
+}

@@ -58,6 +58,11 @@ func (sensor *HIH6021) measure(ctx context.Context) error {
 		return nil
 	}
 
+	if locker, ok := sensor.transport.(sensors.AddressLocker); ok {
+		locker.LockAddr(defaultAddress)
+		defer locker.UnlockAddr(defaultAddress)
+	}
+
 	err := sensor.transport.WriteToAddr(ctx, defaultAddress, []byte{})
 	if err != nil {
 		return fmt.Errorf("could not write measurement request to device: %w", err)
@@ -67,7 +72,7 @@ func (sensor *HIH6021) measure(ctx context.Context) error {
 	resp := make([]byte, 4)
 	err = sensor.transport.ReadFromAddr(ctx, defaultAddress, resp)
 	if err != nil {
-		return fmt.Errorf("could not write measurement request to device: %w", err)
+		return fmt.Errorf("could not read measurement data from device: %w", err)
 	}
 	// check the oldest bit
 	if resp[0]&0x80 > 0 {

@@ -235,6 +235,8 @@ func WithProductID(productID uint16) MCP2221Option {
 
 type MCP2221 struct {
 	mx           sync.Mutex
+	addrLocksMx  sync.Mutex
+	addrLocks    map[byte]*sync.Mutex
 	request      []byte
 	response     []byte
 	responseWait time.Duration
@@ -306,6 +308,7 @@ func NewMCP2221(opts ...MCP2221Option) *MCP2221 {
 		opt(&options)
 	}
 	return &MCP2221{
+		addrLocks:    make(map[byte]*sync.Mutex),
 		request:      make([]byte, 64),
 		response:     make([]byte, 64),
 		responseWait: 50 * time.Millisecond,
@@ -318,6 +321,29 @@ func (d *MCP2221) Init() error {
 	defer d.mx.Unlock()
 	// karalabe/hid doesn't need explicit initialization
 	return nil
+}
+
+func (d *MCP2221) addrMutex(addr byte) *sync.Mutex {
+	d.addrLocksMx.Lock()
+	defer d.addrLocksMx.Unlock()
+	mu, ok := d.addrLocks[addr]
+	if !ok {
+		mu = &sync.Mutex{}
+		d.addrLocks[addr] = mu
+	}
+	return mu
+}
+
+// LockAddr acquires an exclusive per-address lock. Use this to protect
+// multi-step I2C sequences (e.g. trigger-write → delay → data-read) from
+// interleaving with another goroutine targeting the same address.
+func (d *MCP2221) LockAddr(addr byte) {
+	d.addrMutex(addr).Lock()
+}
+
+// UnlockAddr releases the per-address lock acquired by LockAddr.
+func (d *MCP2221) UnlockAddr(addr byte) {
+	d.addrMutex(addr).Unlock()
 }
 
 func (d *MCP2221) connect() error {
