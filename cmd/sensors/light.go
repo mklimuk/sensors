@@ -31,6 +31,10 @@ var lightReadCmd = cli.Command{
 			Value: "mcp2221",
 		},
 		&cli.StringFlag{
+			Name:  "adapter-product,p",
+			Value: "00dd",
+		},
+		&cli.StringFlag{
 			Name:  "sensor,s",
 			Value: "bh1750",
 		},
@@ -57,8 +61,12 @@ var lightReadCmd = cli.Command{
 		case "bh1750":
 			switch c.String("adapter") {
 			case "mcp2221":
-				a := adapter.NewMCP2221()
-				err := a.Init()
+				productID, err := toUint16(c.String("adapter-product"))
+				if err != nil {
+					return console.Exit(1, "invalid adapter product: %s", console.Red(err))
+				}
+				a := adapter.NewMCP2221(adapter.WithProductID(productID))
+				err = a.Init()
 				if err != nil {
 					return console.Exit(1, "adapter initialization error: %s", console.Red(err))
 				}
