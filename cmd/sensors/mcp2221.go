@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mklimuk/sensors/adapter"
@@ -42,6 +45,7 @@ var mcp2221Cmd = cli.Command{
 		&mcp2221GPIOCmd,
 		&mcp2221ResetCmd,
 		&mcp2221ChipCmd,
+		&mcp2221ButtonCmd,
 	},
 }
 
@@ -245,4 +249,99 @@ var mcp2221UpdateVendorCmd = cli.Command{
 		}
 		return nil
 	},
+}
+
+var mcp2221ButtonCmd = cli.Command{
+	Name:        "button",
+	Description: "poll mcp2221 GPIO pins and report button press/release events (active-low: 0 = pressed)",
+	Flags: []cli.Flag{
+		&cli.StringFlag{Name: "product,p", Value: "00dd"},
+		&cli.DurationFlag{
+			Name:    "interval,i",
+			Value:   5 * time.Millisecond,
+			Usage:   "polling interval (USB HID round-trip is ~2-3ms; values <5ms may miss frames)",
+		},
+		&cli.BoolFlag{Name: "verbose,v"},
+	},
+	Action: func(c *cli.Context) error {
+		a, err := mcp2221FromContext(c)
+		if err != nil {
+			return err
+		}
+		if err := a.Init(); err != nil {
+			return console.Exit(1, "adapter initialization error: %s", console.Red(err))
+		}
+
+		ctx, cancel := signal.NotifyContext(
+			snsctx.SetVerbose(context.Background(), c.Bool("verbose")),
+			os.Interrupt, syscall.SIGTERM,
+		)
+		defer cancel()
+
+		if err := a.SetGPIOParameters(ctx, adapter.MCP2221GPIOParameters{
+			GPIO0Mode: adapter.GPIOModeIn,
+			GPIO1Mode: adapter.GPIOModeIn,
+			GPIO2Mode: adapter.GPIOModeIn,
+			GPIO3Mode: adapter.GPIOModeIn,
+		}); err != nil {
+			return console.Exit(1, "could not configure GPIO as inputs: %s", console.Red(err))
+		}
+
+		// Open a sticky session so the polling loop reuses one HID handle
+		// instead of paying USB enumeration on every iteration. Transport
+		// errors invalidate the handle internally; the next ReadGPIO will
+		// reopen lazily, so the loop just needs to keep retrying.
+		if err := a.Open(ctx); err != nil {
+			console.Errorf("initial mcp2221 open failed (will retry on first read): %s", console.Red(err))
+		}
+		defer func() {
+			if err := a.Close(); err != nil {
+				slog.Debug("mcp2221 close failed", "err", err)
+			}
+		}()
+
+		interval := c.Duration("interval")
+		console.Printf("monitoring GP0..GP3 every %s; press Ctrl-C to stop\n", interval)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		var prev adapter.MCP2221GPIOValues
+		first := true
+		for {
+			select {
+			case <-ctx.Done():
+				console.Print("stopping button monitor")
+				return nil
+			case <-ticker.C:
+				vals, err := a.ReadGPIO(ctx)
+				if err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					slog.Debug("button read failed; will retry", "err", err)
+					continue
+				}
+				reportButtonChange("GP0", vals.GPIO0Value, prev.GPIO0Value, first)
+				reportButtonChange("GP1", vals.GPIO1Value, prev.GPIO1Value, first)
+				reportButtonChange("GP2", vals.GPIO2Value, prev.GPIO2Value, first)
+				reportButtonChange("GP3", vals.GPIO3Value, prev.GPIO3Value, first)
+				prev = vals
+				first = false
+			}
+		}
+	},
+}
+
+// reportButtonChange prints a colored line when a GPIO pin transitions, or on
+// the very first sample to establish initial state. Active-low: 0 = pressed.
+func reportButtonChange(name string, cur, prev byte, first bool) {
+	if !first && cur == prev {
+		return
+	}
+	ts := time.Now().Format("15:04:05.000")
+	if cur == 0 {
+		console.Printf("%s %s %s\n", ts, console.Bold(name), console.Red("PRESSED"))
+		return
+	}
+	console.Printf("%s %s %s\n", ts, console.Bold(name), console.Green("RELEASED"))
 }

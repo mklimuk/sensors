@@ -242,6 +242,10 @@ type MCP2221 struct {
 	responseWait time.Duration
 	options      MCP2221Options
 	device       *hid.Device
+	// keepOpen, when true, keeps the HID handle alive across calls so tight
+	// polling loops (e.g. button scanning) don't pay USB enumeration / open
+	// cost on every iteration. Toggled via Open / Close.
+	keepOpen bool
 }
 
 type MCP2221Status struct {
@@ -346,14 +350,17 @@ func (d *MCP2221) UnlockAddr(addr byte) {
 	d.addrMutex(addr).Unlock()
 }
 
+// connect opens the HID device unless one is already attached. In sticky mode
+// (after Open) the existing handle is reused; in per-call mode disconnect()
+// will have closed the previous one so this always opens a fresh handle.
 func (d *MCP2221) connect() error {
-	// Enumerate devices to find the MCP2221
+	if d.device != nil {
+		return nil
+	}
 	devices := hid.Enumerate(d.options.VendorID, d.options.ProductID)
 	if len(devices) == 0 {
 		return fmt.Errorf("could not find hid device vendor: %#x product: %#x", d.options.VendorID, d.options.ProductID)
 	}
-
-	// Open the first device found
 	device, err := devices[d.options.DeviceIndex].Open()
 	if err != nil {
 		return fmt.Errorf("could not open hid device vendor: %#x product: %#x: %w", d.options.VendorID, d.options.ProductID, err)
@@ -362,15 +369,51 @@ func (d *MCP2221) connect() error {
 	return nil
 }
 
+// disconnect closes the HID device only when no sticky session is active.
+// During a session (keepOpen == true) the handle is preserved; the deferred
+// disconnect() at the end of every public method becomes a no-op.
 func (d *MCP2221) disconnect() error {
-	if d.device != nil {
-		err := d.device.Close()
-		if err != nil {
-			return fmt.Errorf("could not close hid device: %w", err)
-		}
-		d.device = nil
+	if d.keepOpen {
+		return nil
+	}
+	return d.invalidate()
+}
+
+// invalidate forcibly drops the current handle so the next connect() reopens.
+// Used both for explicit Close and for self-healing after a transport error
+// while a sticky session is active.
+func (d *MCP2221) invalidate() error {
+	if d.device == nil {
+		return nil
+	}
+	err := d.device.Close()
+	d.device = nil
+	if err != nil {
+		return fmt.Errorf("could not close hid device: %w", err)
 	}
 	return nil
+}
+
+// Open starts a sticky session: subsequent adapter calls reuse the same HID
+// handle until Close is called or a transport error invalidates it. After a
+// transport error the next adapter call will transparently reopen, so callers
+// can simply retry on the next iteration of their loop. Safe to call multiple
+// times; if the device cannot be opened the error is returned but the session
+// flag is still set, so a later call will retry.
+func (d *MCP2221) Open(ctx context.Context) error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.keepOpen = true
+	return d.connect()
+}
+
+// Close ends the sticky session and releases the HID handle. Safe to call
+// even if Open was never called.
+func (d *MCP2221) Close() error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+	d.keepOpen = false
+	return d.invalidate()
 }
 
 func (d *MCP2221) WriteToAddr(ctx context.Context, address byte, buffer []byte) error {
@@ -897,9 +940,11 @@ func (d *MCP2221) send(ctx context.Context) error {
 
 	n, err := d.device.Write(d.request)
 	if err != nil {
+		_ = d.invalidate()
 		return fmt.Errorf("could not write request: %w", err)
 	}
 	if n != 64 {
+		_ = d.invalidate()
 		return fmt.Errorf("short write: %d", n)
 	}
 	return nil
@@ -909,9 +954,11 @@ func (d *MCP2221) send(ctx context.Context) error {
 func (d *MCP2221) receive(ctx context.Context) error {
 	n, err := d.device.Read(d.response)
 	if err != nil {
+		_ = d.invalidate()
 		return fmt.Errorf("could not read response: %w", err)
 	}
 	if n != 64 {
+		_ = d.invalidate()
 		return fmt.Errorf("short read: %d", n)
 	}
 	verbose := snsctx.IsVerbose(ctx)
