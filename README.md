@@ -1,26 +1,48 @@
-# go-mcp2221
-MCP2221 golang client
+# sensors
 
-000 0101
-A: 0xBA = 1011 1010
-B: 0xF7 = 1111 0111
+Build instructions for the `sns` binary using the local `dev` build tool.
 
-000 0011
-A: 0xBC = 1011 1100
-B: 0xF3 = 1111 0011
+## Prerequisites
 
-000 0000
-A: 0xBF = 1011 1111
-B: 0xF3 = 1111 0011
+- Go installed
+- Run commands from the repository root
 
-000 0010
-A: 0xBD = 1011 1101
-B: 0xF3 = 1111 0011
+## 1) Build the `dev` tool first
 
-000 0110
-A: 0xB9 = 1011 1001
-B: 0xF3 = 1111 0011
+Use `Makefile` to compile `dev` for your current host platform:
 
-000 1010
-A: 0xB5 = 1011 0101
-B: 0xF3 = 1111 0011
+```bash
+make build
+```
+
+This creates `./dev`.
+
+## 2) Build `sns` with `./dev`
+
+Your most common build:
+
+```bash
+./dev build --os linux --arch amd64 --version 0.2.0
+```
+
+Output binary is written to `dist/sns`.
+
+## Cross-compilation examples
+
+Build Linux ARM64:
+
+```bash
+./dev build --os linux --arch arm64 --version 0.2.0
+```
+
+If you run on Linux amd64 and need to cross-compile to ARM64 in the native path, you can also use:
+
+```bash
+./dev build --os linux --arch amd64 --cross-os linux --cross-arch arm64 --version 0.2.0
+```
+
+Build macOS ARM64:
+
+```bash
+./dev build --os darwin --arch arm64 --version 0.2.0
+```
